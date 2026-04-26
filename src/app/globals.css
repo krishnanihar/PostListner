@@ -1,0 +1,443 @@
+:root {
+  /* — score palette — */
+  --paper-cream: #F2EBD8;
+  --ink-cream: #1C1814;
+  --ink-cream-secondary: #6B5840;
+  --paper-dark: #0B0908;
+  --ink-dark: #E8DFCB;
+  --ink-dark-secondary: #8A7556;
+  --paper-pure-black: #000000;
+  --score-amber: #D4A053;
+
+  /* — typography — */
+  --font-serif: 'Iowan Old Style', 'Palatino', 'EB Garamond', Georgia, serif;
+  --font-mono: var(--font-jetbrains, ui-monospace, 'JetBrains Mono', SFMono-Regular, Menlo, monospace);
+
+  /* — current paper (set per phase via [data-paper]) — */
+  --paper: var(--paper-cream);
+  --ink: var(--ink-cream);
+  --ink-secondary: var(--ink-cream-secondary);
+}
+
+[data-paper="dark"] {
+  --paper: var(--paper-dark);
+  --ink: var(--ink-dark);
+  --ink-secondary: var(--ink-dark-secondary);
+}
+
+[data-paper="pure-black"] {
+  --paper: var(--paper-pure-black);
+  --ink: var(--ink-dark);
+  --ink-secondary: var(--ink-dark-secondary);
+}
+
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+  -webkit-tap-highlight-color: transparent;
+}
+
+html, body {
+  height: 100%;
+  width: 100%;
+  background: var(--paper);
+  color: var(--ink);
+  overflow: hidden;
+  overscroll-behavior: none;
+  font-family: var(--font-serif);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+  transition: background 0.6s ease, color 0.6s ease;
+}
+
+button { font-family: inherit; color: inherit; }
+
+/* — grain overlay — */
+body::after {
+  content: '';
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  pointer-events: none;
+  background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)'/%3E%3C/svg%3E");
+  background-repeat: repeat;
+  background-size: 256px 256px;
+  opacity: 0.06;
+  mix-blend-mode: multiply;
+}
+
+[data-paper="dark"] body::after,
+body[data-paper="dark"]::after {
+  opacity: 0.03;
+  mix-blend-mode: screen;
+}
+
+/* — page shell — */
+.shell {
+  position: fixed;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.page {
+  position: relative;
+  width: 100%;
+  height: 100%;
+}
+
+/* — chrome (top header) — */
+.topbar {
+  position: fixed;
+  top: 0; left: 0; right: 0;
+  padding: 14px 20px;
+  display: flex;
+  justify-content: space-between;
+  align-items: baseline;
+  z-index: 50;
+  pointer-events: none;
+  font-size: 11px;
+}
+.topbar > * { pointer-events: auto; }
+
+.brand {
+  font-family: var(--font-serif);
+  font-style: italic;
+  color: var(--ink-secondary);
+  letter-spacing: 0.02em;
+}
+.brand strong { font-weight: 500; color: var(--ink); }
+
+.timeline {
+  display: flex;
+  gap: 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  color: var(--ink-secondary);
+}
+.tl-step {
+  background: none;
+  border: none;
+  padding: 0;
+  cursor: pointer;
+  font: inherit;
+  color: inherit;
+  letter-spacing: inherit;
+  opacity: 0.45;
+  transition: opacity 0.4s ease, color 0.4s ease;
+}
+.tl-step:hover { opacity: 0.85; }
+.tl-step.done { opacity: 0.7; }
+.tl-step.active {
+  opacity: 1;
+  color: var(--score-amber);
+}
+
+.timer {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-secondary);
+  letter-spacing: 0.06em;
+  font-variant-numeric: tabular-nums;
+}
+
+/* — controls (footer) — */
+.controls {
+  position: fixed;
+  bottom: 18px;
+  left: 0; right: 0;
+  display: flex;
+  justify-content: center;
+  gap: 28px;
+  z-index: 50;
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 13px;
+}
+.ctrl-btn {
+  background: transparent;
+  border: none;
+  color: var(--ink-secondary);
+  cursor: pointer;
+  padding: 4px 8px;
+  font: inherit;
+  letter-spacing: 0.02em;
+  transition: color 0.3s ease;
+}
+.ctrl-btn:hover:not(:disabled) { color: var(--ink); }
+.ctrl-btn:disabled { opacity: 0.3; cursor: not-allowed; }
+.ctrl-btn.primary { color: var(--score-amber); }
+
+/* — notes drawer — */
+.notes-toggle {
+  position: fixed;
+  top: 14px;
+  right: 20px;
+  background: transparent;
+  border: none;
+  color: var(--ink-secondary);
+  cursor: pointer;
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 14px;
+  z-index: 60;
+  transition: color 0.3s;
+  padding: 6px;
+}
+.notes-toggle:hover { color: var(--score-amber); }
+
+.notes-drawer {
+  position: fixed;
+  top: 0; right: -440px; bottom: 0;
+  width: 420px;
+  background: var(--paper);
+  border-left: 1px solid var(--ink-secondary);
+  overflow-y: auto;
+  transition: right 0.5s cubic-bezier(0.4, 0, 0.2, 1);
+  z-index: 70;
+  padding: 56px 32px 36px;
+  color: var(--ink);
+}
+.notes-drawer.open { right: 0; }
+.notes-drawer::-webkit-scrollbar { width: 3px; }
+.notes-drawer::-webkit-scrollbar-track { background: transparent; }
+.notes-drawer::-webkit-scrollbar-thumb { background: var(--ink-secondary); opacity: 0.3; }
+
+.notes-close {
+  position: absolute;
+  top: 16px; right: 18px;
+  background: transparent;
+  border: none;
+  color: var(--ink-secondary);
+  font-family: var(--font-serif);
+  font-size: 18px;
+  cursor: pointer;
+}
+.notes-close:hover { color: var(--score-amber); }
+
+.notes-eyebrow {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-secondary);
+  margin-bottom: 6px;
+}
+.notes-title {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 32px;
+  line-height: 1.1;
+  color: var(--ink);
+  margin-bottom: 20px;
+  letter-spacing: -0.01em;
+}
+.notes-section { margin-bottom: 22px; }
+.notes-section h4 {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--score-amber);
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+.notes-section p {
+  font-family: var(--font-serif);
+  font-size: 14px;
+  line-height: 1.6;
+  color: var(--ink);
+  margin-bottom: 8px;
+}
+.divergence {
+  margin-top: 20px;
+  padding: 14px;
+  border: 1px dashed var(--ink-secondary);
+  background: transparent;
+}
+.divergence h4 {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  color: var(--score-amber);
+  text-transform: uppercase;
+  font-weight: 500;
+  margin-bottom: 8px;
+}
+.divergence p {
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 12.5px;
+  line-height: 1.55;
+  color: var(--ink-secondary);
+}
+
+.lib-coverage {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid var(--ink-secondary);
+}
+.lib-coverage h4 {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+  color: var(--score-amber);
+  margin-bottom: 12px;
+  font-weight: 500;
+}
+.lib-summary {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  color: var(--ink-secondary);
+  margin-bottom: 14px;
+  letter-spacing: 0.04em;
+  line-height: 1.6;
+}
+.lib-summary strong { color: var(--ink); }
+.arc-list { list-style: none; padding: 0; margin: 0; }
+.arc-list li {
+  display: flex; align-items: baseline; gap: 10px;
+  margin-bottom: 4px;
+  padding: 6px 0;
+  border-bottom: 1px solid transparent;
+  transition: all 0.4s;
+}
+.arc-list li.viable { color: var(--ink); }
+.arc-list li.leading {
+  color: var(--score-amber);
+  border-bottom-color: var(--score-amber);
+}
+.arc-list li.pruned {
+  opacity: 0.35;
+  text-decoration: line-through;
+  text-decoration-color: var(--ink-secondary);
+}
+.arc-list .arc-name {
+  flex: 1;
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 14px;
+}
+.arc-list .arc-score {
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+}
+.citations {
+  margin-top: 28px;
+  padding-top: 20px;
+  border-top: 1px solid var(--ink-secondary);
+}
+.citations h4 {
+  font-family: var(--font-mono);
+  font-size: 9px;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+  color: var(--ink-secondary);
+  margin-bottom: 12px;
+}
+.citations p {
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  line-height: 1.6;
+  color: var(--ink-secondary);
+  margin-bottom: 7px;
+}
+
+/* — phase fades — */
+.scene-fade-enter {
+  animation: sceneFade 0.7s ease-out;
+}
+@keyframes sceneFade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+/* — common HTML overlays for phases — */
+.overlay {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+}
+.overlay > * { pointer-events: auto; }
+
+.score-input {
+  width: 100%;
+  background: transparent;
+  border: none;
+  outline: none;
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-weight: 400;
+  font-size: 22px;
+  color: var(--ink);
+  padding: 6px 0;
+  text-align: center;
+}
+.score-input::placeholder {
+  color: var(--ink-secondary);
+  font-style: italic;
+}
+
+/* — utility for emotion tile pane — */
+.tile-row {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 16px 22px;
+}
+.tile-word {
+  background: transparent;
+  border: none;
+  padding: 4px 0;
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 19px;
+  color: var(--ink-secondary);
+  cursor: pointer;
+  transition: color 0.3s;
+  letter-spacing: 0.01em;
+  position: relative;
+}
+.tile-word:hover { color: var(--ink); }
+.tile-word.selected { color: var(--ink); }
+.tile-word.selected::after {
+  content: '';
+  position: absolute;
+  left: 0; right: 0; bottom: -2px;
+  height: 1px;
+  background: var(--score-amber);
+}
+
+/* — moment liking — */
+.liking-row {
+  display: flex;
+  justify-content: center;
+  gap: 18px;
+}
+.liking-num {
+  background: transparent;
+  border: none;
+  font-family: var(--font-serif);
+  font-style: italic;
+  font-size: 18px;
+  color: var(--ink-secondary);
+  cursor: pointer;
+  transition: color 0.3s;
+  font-variant-numeric: tabular-nums;
+}
+.liking-num:hover { color: var(--ink); }
+.liking-num.chosen { color: var(--score-amber); }
+
+/* — responsive — */
+@media (max-width: 420px) {
+  .controls { gap: 18px; bottom: 14px; font-size: 12px; }
+  .topbar { padding: 12px 16px; font-size: 10px; }
+  .timeline { gap: 8px; font-size: 9px; }
+  .notes-drawer { width: 100%; right: -100%; }
+}

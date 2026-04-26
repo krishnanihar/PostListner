@@ -1,0 +1,1689 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1.0" />
+<title>PostListener · Profiling v2 · The 5-minute Separation Rite</title>
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,300..900;1,9..144,300..900&family=JetBrains+Mono:ital,wght@0,300..800;1,300..800&display=swap" rel="stylesheet" />
+<style>
+  :root{
+    --obsidian:#0a0a0c;
+    --obsidian-2:#14141a;
+    --slate:#2a2d35;
+    --slate-2:#3d4148;
+    --ash:#6b6b73;
+    --bone:#e8e4dc;
+    --bone-dim:#a6a39c;
+    --ember:#c97a4a;
+    --ember-deep:#a05828;
+    --ember-glow:rgba(201,122,74,0.18);
+    --ok:#7a9b6e;
+    --display: 'Fraunces', 'Times New Roman', serif;
+    --mono: 'JetBrains Mono', 'Menlo', monospace;
+    --body: 'Fraunces', 'Times New Roman', serif;
+  }
+  *{box-sizing:border-box;margin:0;padding:0}
+  html,body{
+    background:var(--obsidian);
+    color:var(--bone);
+    font-family:var(--body);
+    min-height:100vh;
+    overflow-x:hidden;
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+  }
+  /* ambient grain */
+  body::before{
+    content:"";
+    position:fixed;inset:0;
+    pointer-events:none;
+    background-image:
+      radial-gradient(ellipse at 20% 10%, rgba(201,122,74,0.04), transparent 50%),
+      radial-gradient(ellipse at 80% 80%, rgba(201,122,74,0.025), transparent 50%);
+    mix-blend-mode:screen;
+    z-index:1;
+  }
+  body::after{
+    content:"";
+    position:fixed;inset:0;
+    pointer-events:none;
+    background-image:url("data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' width='200' height='200'><filter id='n'><feTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='2' stitchTiles='stitch'/><feColorMatrix values='0 0 0 0 0.92 0 0 0 0 0.89 0 0 0 0 0.86 0 0 0 0.06 0'/></filter><rect width='200' height='200' filter='url(%23n)'/></svg>");
+    opacity:0.4;
+    mix-blend-mode:overlay;
+    z-index:2;
+  }
+
+  /* — top bar — */
+  .topbar{
+    position:fixed;top:0;left:0;right:0;
+    padding:18px 28px;
+    display:flex;align-items:center;justify-content:space-between;
+    z-index:50;
+    pointer-events:none;
+  }
+  .brand{
+    font-family:var(--mono);
+    font-size:10px;
+    letter-spacing:0.18em;
+    text-transform:uppercase;
+    color:var(--bone-dim);
+    pointer-events:auto;
+  }
+  .brand strong{color:var(--bone);font-weight:500}
+  .timeline{
+    display:flex;align-items:center;gap:8px;
+    pointer-events:auto;
+  }
+  .tl-step{
+    width:34px;height:2px;
+    background:var(--slate);
+    transition:background 0.6s ease;
+    cursor:pointer;
+    position:relative;
+  }
+  .tl-step.done{background:var(--ember-deep)}
+  .tl-step.active{background:var(--ember)}
+  .tl-step::after{
+    content:attr(data-label);
+    position:absolute;top:10px;left:0;
+    font-family:var(--mono);
+    font-size:8.5px;
+    letter-spacing:0.14em;
+    text-transform:uppercase;
+    color:var(--ash);
+    white-space:nowrap;
+    opacity:0;transition:opacity 0.3s;
+  }
+  .tl-step.active::after{opacity:1;color:var(--bone-dim)}
+  .timer{
+    font-family:var(--mono);
+    font-size:10px;
+    letter-spacing:0.14em;
+    color:var(--ash);
+    pointer-events:auto;
+    font-variant-numeric:tabular-nums;
+  }
+
+  /* — stage — */
+  .stage{
+    position:relative;
+    min-height:100vh;
+    width:100%;
+    display:flex;align-items:center;justify-content:center;
+    padding:80px 24px 100px;
+    z-index:5;
+  }
+
+  /* — phase: threshold — */
+  .threshold{
+    text-align:center;
+    max-width:560px;
+  }
+  .threshold .name{
+    font-family:var(--display);
+    font-style:italic;
+    font-weight:300;
+    font-size:clamp(40px,6vw,72px);
+    font-variation-settings:'opsz' 144;
+    letter-spacing:-0.01em;
+    color:var(--bone);
+    margin-bottom:48px;
+    opacity:0;
+    animation:slowFade 2.4s ease-out forwards;
+  }
+  .breath-ring{
+    width:200px;height:200px;margin:0 auto 36px;
+    position:relative;
+    opacity:0;
+    animation:slowFade 2s 1s ease-out forwards;
+  }
+  .breath-ring svg{transform:rotate(-90deg);width:100%;height:100%}
+  .breath-ring .bg{stroke:var(--slate);stroke-width:1;fill:none}
+  .breath-ring .fg{
+    stroke:var(--ember);
+    stroke-width:1.4;
+    fill:none;
+    stroke-dasharray:565;
+    stroke-dashoffset:565;
+  }
+  .breath-ring.active .fg{
+    animation:exhale 6s ease-in-out infinite;
+  }
+  .breath-ring .pulse{
+    position:absolute;inset:0;
+    display:flex;align-items:center;justify-content:center;
+    font-family:var(--mono);
+    font-size:9px;letter-spacing:0.24em;
+    text-transform:uppercase;
+    color:var(--bone-dim);
+  }
+  @keyframes exhale{
+    0%{stroke-dashoffset:565;}
+    50%{stroke-dashoffset:0;}
+    100%{stroke-dashoffset:565;}
+  }
+  .voice-line{
+    font-family:var(--display);
+    font-style:italic;
+    font-weight:300;
+    font-size:22px;
+    line-height:1.5;
+    color:var(--bone);
+    max-width:440px;
+    margin:0 auto;
+    opacity:0;
+  }
+  .voice-line.show{animation:rise 1.6s ease-out forwards}
+  @keyframes rise{
+    from{opacity:0;transform:translateY(8px)}
+    to{opacity:1;transform:translateY(0)}
+  }
+  @keyframes slowFade{
+    from{opacity:0}
+    to{opacity:0.94}
+  }
+  .threshold-instructions{
+    font-family:var(--mono);
+    font-size:10px;
+    letter-spacing:0.16em;
+    text-transform:uppercase;
+    color:var(--ash);
+    margin-top:28px;
+    opacity:0;
+    animation:slowFade 1.6s 3s ease-out forwards;
+  }
+
+  /* — phase: pairwise — */
+  .pairwise{
+    width:100%;max-width:980px;
+  }
+  .pair-counter{
+    text-align:center;
+    font-family:var(--mono);
+    font-size:10px;
+    letter-spacing:0.18em;
+    text-transform:uppercase;
+    color:var(--bone-dim);
+    margin-bottom:14px;
+  }
+  .pair-counter strong{color:var(--ember)}
+  .pair-prompt{
+    text-align:center;
+    font-family:var(--display);
+    font-style:italic;
+    font-weight:300;
+    font-size:28px;
+    color:var(--bone);
+    margin-bottom:54px;
+    opacity:0.85;
+  }
+  .pair-cards{
+    display:grid;grid-template-columns:1fr 1fr;
+    gap:36px;
+  }
+  .pair-card{
+    background:var(--obsidian-2);
+    border:1px solid var(--slate);
+    aspect-ratio:1.05/1;
+    cursor:pointer;
+    display:flex;flex-direction:column;justify-content:space-between;
+    padding:32px;
+    position:relative;
+    overflow:hidden;
+    transition:border-color 0.4s ease, transform 0.4s ease;
+  }
+  .pair-card:hover{
+    border-color:var(--ember);
+    transform:translateY(-2px);
+  }
+  .pair-card.chosen{
+    border-color:var(--ember);
+    background:linear-gradient(135deg, var(--obsidian-2), rgba(201,122,74,0.06));
+  }
+  .pair-card .label{
+    font-family:var(--mono);
+    font-size:9.5px;
+    letter-spacing:0.18em;
+    text-transform:uppercase;
+    color:var(--bone-dim);
+  }
+  .pair-card.chosen .label{color:var(--ember)}
+  .pair-card .descriptor{
+    font-family:var(--display);
+    font-style:italic;
+    font-weight:300;
+    font-size:32px;
+    line-height:1.1;
+    color:var(--bone);
+  }
+  .waveform{
+    width:100%;height:60px;
+    display:flex;align-items:center;gap:2px;
+  }
+  .waveform .bar{
+    flex:1;background:var(--ash);
+    transition:background 0.6s, height 0.4s;
+    transform-origin:center;
+  }
+  .pair-card:hover .bar{background:var(--bone-dim)}
+  .pair-card.chosen .bar{background:var(--ember)}
+
+  /* — phase: gems probe — */
+  .gems{
+    width:100%;max-width:760px;
+    text-align:center;
+  }
+  .excerpt-counter{
+    font-family:var(--mono);
+    font-size:10px;
+    letter-spacing:0.18em;
+    text-transform:uppercase;
+    color:var(--bone-dim);
+    margin-bottom:14px;
+  }
+  .excerpt-counter strong{color:var(--ember)}
+  .gems-prompt{
+    font-family:var(--display);
+    font-style:italic;
+    font-weight:300;
+    font-size:28px;
+    color:var(--bone);
+    margin-bottom:42px;
+  }
+  .visualizer{
+    width:300px;height:300px;margin:0 auto 42px;
+    position:relative;
+  }
+  .visualizer svg{width:100%;height:100%}
+  .vis-ring{
+    fill:none;
+    stroke:var(--ember);
+    stroke-width:0.6;
+    transform-origin:center;
+  }
+  .visualizer.playing .vis-ring{
+    animation:pulse 3.6s ease-in-out infinite;
+  }
+  @keyframes pulse{
+    0%,100%{opacity:0.15;transform:scale(0.95)}
+    50%{opacity:0.55;transform:scale(1.04)}
+  }
+  .visualizer .center-label{
+    position:absolute;inset:0;
+    display:flex;align-items:center;justify-content:center;
+    font-family:var(--mono);
+    font-size:9px;letter-spacing:0.22em;
+    text-transform:uppercase;
+    color:var(--bone-dim);
+  }
+  .tile-prompt{
+    font-family:var(--mono);
+    font-size:10px;
+    letter-spacing:0.18em;
+    text-transform:uppercase;
+    color:var(--bone-dim);
+    margin-bottom:18px;
+    opacity:0;transition:opacity 0.4s;
+  }
+  .tile-prompt.show{opacity:1}
+  .tile-grid{
+    display:grid;grid-template-columns:repeat(3,1fr);
+    gap:12px;
+    max-width:520px;margin:0 auto;
+    opacity:0;
+    transition:opacity 0.4s;
+  }
+  .tile-grid.show{opacity:1}
+  .tile{
+    background:var(--obsidian-2);
+    border:1px solid var(--slate);
+    padding:16px 12px;
+    cursor:pointer;
+    font-family:var(--display);
+    font-style:italic;
+    font-weight:300;
+    font-size:18px;
+    color:var(--bone-dim);
+    transition:all 0.3s ease;
+  }
+  .tile:hover{border-color:var(--ember-deep);color:var(--bone)}
+  .tile.selected{border-color:var(--ember);color:var(--ember);background:rgba(201,122,74,0.06)}
+  .tile-fade-bar{
+    width:520px;max-width:100%;
+    height:1px;background:var(--slate);
+    margin:18px auto 0;
+    position:relative;overflow:hidden;
+    opacity:0;transition:opacity 0.4s;
+  }
+  .tile-fade-bar.show{opacity:1}
+  .tile-fade-bar .fill{
+    position:absolute;left:0;top:0;height:100%;
+    background:var(--ember);
+    width:100%;
+    animation:countdown 6s linear forwards;
+  }
+  @keyframes countdown{
+    from{width:100%}
+    to{width:0}
+  }
+
+  /* — phase: three songs — */
+  .threesongs{
+    width:100%;max-width:560px;
+  }
+  .ts-eyebrow{
+    text-align:center;
+    font-family:var(--mono);
+    font-size:10px;
+    letter-spacing:0.18em;
+    text-transform:uppercase;
+    color:var(--bone-dim);
+    margin-bottom:14px;
+  }
+  .ts-eyebrow strong{color:var(--ember)}
+  .ts-prompt{
+    font-family:var(--display);
+    font-style:italic;
+    font-weight:300;
+    font-size:30px;
+    line-height:1.3;
+    color:var(--bone);
+    text-align:center;
+    margin-bottom:48px;
+    min-height:80px;
+  }
+  .ts-input-wrap{
+    border-bottom:1px solid var(--slate);
+    padding-bottom:14px;
+    margin-bottom:32px;
+    transition:border-color 0.3s;
+  }
+  .ts-input-wrap:focus-within{border-color:var(--ember)}
+  .ts-input{
+    width:100%;
+    background:transparent;
+    border:none;
+    outline:none;
+    font-family:var(--display);
+    font-style:italic;
+    font-weight:300;
+    font-size:22px;
+    color:var(--bone);
+    padding:8px 0;
+  }
+  .ts-input::placeholder{
+    color:var(--ash);
+    font-style:italic;
+  }
+  .ts-meta{
+    font-family:var(--mono);
+    font-size:9px;
+    letter-spacing:0.18em;
+    text-transform:uppercase;
+    color:var(--ash);
+    margin-top:6px;
+  }
+  .ts-voice{
+    font-family:var(--display);
+    font-style:italic;
+    font-weight:300;
+    font-size:14px;
+    color:var(--bone-dim);
+    text-align:center;
+    margin-top:36px;
+    opacity:0.7;
+  }
+
+  /* — phase: moment (tap-along + liking) — */
+  .moment{
+    width:100%;max-width:680px;
+    text-align:center;
+  }
+  .mom-eyebrow{
+    font-family:var(--mono);
+    font-size:10px;
+    letter-spacing:0.18em;
+    text-transform:uppercase;
+    color:var(--bone-dim);
+    margin-bottom:14px;
+  }
+  .mom-eyebrow strong{color:var(--ember)}
+  .mom-prompt{
+    font-family:var(--display);
+    font-style:italic;
+    font-weight:300;
+    font-size:28px;
+    line-height:1.3;
+    color:var(--bone);
+    margin-bottom:54px;
+  }
+  .mom-tap-zone{
+    width:100%;
+    aspect-ratio:2.4/1;
+    border:1px solid var(--slate);
+    background:var(--obsidian-2);
+    cursor:pointer;
+    position:relative;
+    overflow:hidden;
+    transition:border-color 0.4s, background 0.4s;
+    user-select:none;
+  }
+  .mom-tap-zone:hover{border-color:var(--ember-deep)}
+  .mom-tap-zone.tapping{border-color:var(--ember)}
+  .mom-tap-zone .tap-instruction{
+    position:absolute;inset:0;
+    display:flex;flex-direction:column;align-items:center;justify-content:center;
+    pointer-events:none;
+    z-index:3;
+  }
+  .mom-tap-zone .tap-bpm{
+    font-family:var(--display);
+    font-style:italic;
+    font-weight:300;
+    font-variation-settings:'opsz' 144;
+    font-size:64px;
+    color:var(--bone);
+    line-height:1;
+    margin-bottom:8px;
+  }
+  .mom-tap-zone .tap-bpm-label{
+    font-family:var(--mono);
+    font-size:9px;letter-spacing:0.24em;color:var(--ash);
+    text-transform:uppercase;
+  }
+  .mom-tap-zone .tap-hint{
+    font-family:var(--mono);
+    font-size:10px;letter-spacing:0.22em;text-transform:uppercase;
+    color:var(--bone-dim);
+    margin-top:10px;
+  }
+  .mom-tap-pulse{
+    position:absolute;left:50%;top:50%;
+    width:16px;height:16px;
+    background:var(--ember);
+    border-radius:50%;
+    transform:translate(-50%,-50%);
+    opacity:0;
+    pointer-events:none;
+  }
+  .mom-tap-pulse.flash{animation:tapPulse 0.4s ease-out}
+  @keyframes tapPulse{
+    0%{opacity:0.7;transform:translate(-50%,-50%) scale(1)}
+    100%{opacity:0;transform:translate(-50%,-50%) scale(10)}
+  }
+  .mom-track-meta{
+    margin-top:18px;
+    font-family:var(--mono);
+    font-size:9px;
+    letter-spacing:0.22em;
+    text-transform:uppercase;
+    color:var(--ash);
+  }
+  .mom-track-meta strong{color:var(--ember-deep)}
+  .mom-voice-line{
+    margin-top:28px;
+    font-family:var(--display);
+    font-style:italic;
+    font-weight:300;
+    font-size:14px;
+    color:var(--bone-dim);
+    opacity:0.7;
+  }
+  .mom-liking{
+    margin-top:48px;
+    opacity:0;
+    pointer-events:none;
+    transition:opacity 0.6s;
+  }
+  .mom-liking.show{opacity:1;pointer-events:auto}
+  .mom-liking-prompt{
+    font-family:var(--display);
+    font-style:italic;
+    font-weight:300;
+    font-size:22px;
+    color:var(--bone);
+    margin-bottom:24px;
+  }
+  .mom-liking-scale{
+    display:flex;justify-content:center;gap:10px;
+  }
+  .mom-liking-dot{
+    width:38px;height:38px;
+    border-radius:50%;
+    border:1px solid var(--slate);
+    background:transparent;
+    cursor:pointer;
+    font-family:var(--mono);
+    font-size:11px;
+    color:var(--bone-dim);
+    transition:all 0.3s;
+  }
+  .mom-liking-dot:hover{border-color:var(--ember-deep);color:var(--bone)}
+  .mom-liking-dot.chosen{border-color:var(--ember);color:var(--ember);background:rgba(201,122,74,0.06)}
+  .mom-liking-anchors{
+    display:flex;justify-content:space-between;
+    margin:16px auto 0;
+    max-width:520px;
+    font-family:var(--mono);
+    font-size:9px;
+    letter-spacing:0.18em;
+    text-transform:uppercase;
+    color:var(--ash);
+  }
+
+  /* — library coverage indicator (in notes drawer) — */
+  .lib-coverage{
+    margin-top:32px;
+    padding-top:24px;
+    border-top:1px solid var(--slate);
+  }
+  .lib-coverage h4{
+    font-family:var(--mono);
+    font-size:9px;
+    letter-spacing:0.22em;
+    text-transform:uppercase;
+    color:var(--ember);
+    margin-bottom:14px;
+    font-weight:500;
+  }
+  .lib-summary{
+    font-family:var(--mono);
+    font-size:10px;
+    color:var(--bone-dim);
+    margin-bottom:14px;
+    letter-spacing:0.06em;
+    line-height:1.6;
+  }
+  .lib-summary strong{color:var(--bone)}
+  .arc-list{
+    list-style:none;
+    padding:0;
+    margin:0;
+  }
+  .arc-list li{
+    display:flex;align-items:center;gap:10px;
+    margin-bottom:6px;
+    font-family:var(--mono);
+    font-size:9.5px;
+    letter-spacing:0.04em;
+    color:var(--bone-dim);
+    padding:7px 8px;
+    border-left:2px solid var(--slate);
+    transition:all 0.4s;
+  }
+  .arc-list li.viable{border-left-color:var(--ember-deep);color:var(--bone)}
+  .arc-list li.leading{border-left-color:var(--ember);color:var(--ember);background:rgba(201,122,74,0.04)}
+  .arc-list li.pruned{opacity:0.35;text-decoration:line-through}
+  .arc-list .arc-name{
+    flex:1;text-transform:none;
+    font-style:italic;font-family:var(--display);
+    font-size:13px;letter-spacing:0;
+  }
+  .arc-list .arc-score{
+    font-variant-numeric:tabular-nums;
+    color:inherit;
+  }
+
+  /* — divergence note — */
+  .divergence{
+    margin-top:24px;
+    padding:14px;
+    border:1px dashed var(--slate);
+    background:rgba(201,122,74,0.02);
+  }
+  .divergence h4{
+    font-family:var(--mono);
+    font-size:9px;
+    letter-spacing:0.2em;
+    color:var(--ember);
+    text-transform:uppercase;
+    font-weight:500;
+    margin-bottom:8px;
+  }
+  .divergence p{
+    font-family:var(--display);
+    font-style:italic;
+    font-size:12.5px;
+    line-height:1.55;
+    color:var(--bone-dim);
+  }
+
+  /* — phase: mirror — */
+  .mirror{
+    width:100%;max-width:620px;
+    text-align:center;
+  }
+  .mirror-eyebrow{
+    font-family:var(--mono);
+    font-size:9.5px;
+    letter-spacing:0.28em;
+    text-transform:uppercase;
+    color:var(--ember);
+    margin-bottom:32px;
+    opacity:0;
+  }
+  .mirror-archetype{
+    font-family:var(--display);
+    font-style:italic;
+    font-weight:300;
+    font-variation-settings:'opsz' 144;
+    font-size:clamp(48px,7vw,82px);
+    line-height:1.05;
+    color:var(--bone);
+    margin-bottom:14px;
+    opacity:0;
+  }
+  .mirror-variation{
+    font-family:var(--mono);
+    font-size:10px;
+    letter-spacing:0.28em;
+    text-transform:uppercase;
+    color:var(--bone-dim);
+    margin-bottom:64px;
+    opacity:0;
+  }
+  .mirror-divider{
+    width:48px;height:1px;
+    background:var(--ember);
+    margin:0 auto 64px;
+    opacity:0;
+  }
+  .mirror-line{
+    font-family:var(--display);
+    font-style:italic;
+    font-weight:300;
+    font-size:20px;
+    line-height:1.6;
+    color:var(--bone);
+    margin-bottom:18px;
+    opacity:0;
+  }
+  .mirror-line.dim{color:var(--bone-dim)}
+  .mirror-handoff{
+    font-family:var(--display);
+    font-style:italic;
+    font-weight:400;
+    font-size:24px;
+    color:var(--ember);
+    margin-top:64px;
+    opacity:0;
+  }
+  .reveal-1{animation:rise 1.6s 0.2s ease-out forwards}
+  .reveal-2{animation:rise 1.6s 1.2s ease-out forwards}
+  .reveal-3{animation:rise 1.6s 2.0s ease-out forwards}
+  .reveal-4{animation:fadeIn 1.4s 3.2s ease-out forwards}
+  .reveal-5{animation:rise 1.4s 4.4s ease-out forwards}
+  .reveal-6{animation:rise 1.4s 5.6s ease-out forwards}
+  .reveal-7{animation:rise 1.4s 6.8s ease-out forwards}
+  .reveal-8{animation:rise 1.4s 8.0s ease-out forwards}
+  .reveal-9{animation:rise 1.4s 9.2s ease-out forwards}
+  .reveal-10{animation:rise 1.4s 10.4s ease-out forwards}
+  .reveal-11{animation:rise 2s 11.6s ease-out forwards}
+  @keyframes fadeIn{from{opacity:0}to{opacity:1}}
+
+  /* — controls — */
+  .controls{
+    position:fixed;bottom:20px;left:0;right:0;
+    display:flex;justify-content:center;gap:12px;
+    z-index:50;
+  }
+  .ctrl-btn{
+    background:rgba(20,20,26,0.85);
+    backdrop-filter:blur(12px);
+    border:1px solid var(--slate);
+    color:var(--bone-dim);
+    padding:10px 22px;
+    font-family:var(--mono);
+    font-size:9.5px;
+    letter-spacing:0.22em;
+    text-transform:uppercase;
+    cursor:pointer;
+    transition:all 0.3s ease;
+  }
+  .ctrl-btn:hover:not(:disabled){
+    border-color:var(--ember);color:var(--ember);
+  }
+  .ctrl-btn:disabled{opacity:0.3;cursor:not-allowed}
+  .ctrl-btn.primary{
+    background:rgba(201,122,74,0.1);
+    border-color:var(--ember);color:var(--ember);
+  }
+  .ctrl-btn.primary:hover{background:rgba(201,122,74,0.2)}
+
+  /* — notes drawer — */
+  .notes-toggle{
+    position:fixed;top:20px;right:24px;
+    background:rgba(20,20,26,0.85);
+    backdrop-filter:blur(12px);
+    border:1px solid var(--slate);
+    color:var(--bone-dim);
+    width:36px;height:36px;
+    cursor:pointer;
+    font-family:var(--mono);
+    font-size:14px;
+    z-index:60;
+    display:flex;align-items:center;justify-content:center;
+    transition:all 0.3s ease;
+  }
+  .notes-toggle:hover{border-color:var(--ember);color:var(--ember)}
+  .notes-drawer{
+    position:fixed;top:0;right:-440px;bottom:0;
+    width:420px;
+    background:var(--obsidian-2);
+    border-left:1px solid var(--slate);
+    overflow-y:auto;
+    transition:right 0.5s cubic-bezier(0.4,0,0.2,1);
+    z-index:70;
+    padding:60px 36px 40px;
+  }
+  .notes-drawer.open{right:0}
+  .notes-drawer::-webkit-scrollbar{width:4px}
+  .notes-drawer::-webkit-scrollbar-track{background:var(--obsidian)}
+  .notes-drawer::-webkit-scrollbar-thumb{background:var(--slate)}
+  .notes-eyebrow{
+    font-family:var(--mono);
+    font-size:9px;
+    letter-spacing:0.24em;
+    text-transform:uppercase;
+    color:var(--ember);
+    margin-bottom:6px;
+  }
+  .notes-title{
+    font-family:var(--display);
+    font-style:italic;
+    font-weight:300;
+    font-size:36px;
+    line-height:1.1;
+    color:var(--bone);
+    margin-bottom:24px;
+  }
+  .notes-section{
+    margin-bottom:28px;
+  }
+  .notes-section h4{
+    font-family:var(--mono);
+    font-size:9.5px;
+    letter-spacing:0.2em;
+    text-transform:uppercase;
+    color:var(--ember);
+    font-weight:500;
+    margin-bottom:10px;
+  }
+  .notes-section p{
+    font-family:var(--display);
+    font-style:italic;
+    font-weight:300;
+    font-size:14px;
+    line-height:1.6;
+    color:var(--bone-dim);
+    margin-bottom:10px;
+  }
+  .notes-section ul{
+    list-style:none;
+    padding-left:14px;
+  }
+  .notes-section li{
+    font-family:var(--display);
+    font-size:13px;
+    line-height:1.6;
+    color:var(--bone-dim);
+    margin-bottom:6px;
+    position:relative;
+  }
+  .notes-section li::before{
+    content:"·";
+    position:absolute;left:-12px;
+    color:var(--ember);
+  }
+  .citations{
+    margin-top:32px;
+    padding-top:24px;
+    border-top:1px solid var(--slate);
+  }
+  .citations h4{
+    font-family:var(--mono);
+    font-size:9px;
+    letter-spacing:0.22em;
+    text-transform:uppercase;
+    color:var(--bone-dim);
+    margin-bottom:12px;
+  }
+  .citations p{
+    font-family:var(--mono);
+    font-size:10px;
+    line-height:1.7;
+    color:var(--ash);
+    margin-bottom:8px;
+  }
+
+  /* — close button on drawer — */
+  .notes-close{
+    position:absolute;top:18px;right:20px;
+    background:transparent;border:none;
+    color:var(--bone-dim);
+    font-family:var(--mono);
+    font-size:18px;
+    cursor:pointer;
+  }
+  .notes-close:hover{color:var(--ember)}
+
+  /* — utility / responsive — */
+  @media (max-width:768px){
+    .pair-cards{grid-template-columns:1fr;gap:18px}
+    .tile-grid{grid-template-columns:repeat(2,1fr)}
+    .timeline{display:none}
+    .notes-drawer{width:100%;right:-100%}
+    .topbar{padding:14px 18px}
+    .stage{padding:70px 18px 90px}
+  }
+
+  /* — subtle scene fade — */
+  .scene{
+    animation:sceneFade 0.8s ease-out;
+  }
+  @keyframes sceneFade{
+    from{opacity:0;transform:translateY(6px)}
+    to{opacity:1;transform:translateY(0)}
+  }
+</style>
+</head>
+<body>
+
+<div class="topbar">
+  <div class="brand"><strong>POSTLISTENER</strong> · PROFILING V2 · 5-MIN SEPARATION RITE</div>
+  <div class="timeline" id="timeline">
+    <div class="tl-step active" data-label="THRESHOLD" data-phase="0"></div>
+    <div class="tl-step" data-label="FIRST PULL" data-phase="1"></div>
+    <div class="tl-step" data-label="GEMS PROBE" data-phase="2"></div>
+    <div class="tl-step" data-label="THREE SONGS" data-phase="3"></div>
+    <div class="tl-step" data-label="MOMENT" data-phase="4"></div>
+    <div class="tl-step" data-label="MIRROR" data-phase="5"></div>
+  </div>
+  <div class="timer" id="timer">00:00 / 05:00</div>
+</div>
+
+<button class="notes-toggle" onclick="toggleNotes()" title="Design notes & research citations">𝓘</button>
+
+<div class="stage" id="stage">
+  <!-- phases injected here -->
+</div>
+
+<div class="controls">
+  <button class="ctrl-btn" id="prevBtn" onclick="prevPhase()">← Prev</button>
+  <button class="ctrl-btn" id="resetBtn" onclick="reset()">Reset</button>
+  <button class="ctrl-btn primary" id="nextBtn" onclick="nextPhase()">Next →</button>
+</div>
+
+<div class="notes-drawer" id="notesDrawer">
+  <button class="notes-close" onclick="toggleNotes()">×</button>
+  <div id="notesContent"></div>
+</div>
+
+<script>
+/* ========================================================
+   PostListener Profiling v2 — interactive prototype
+   Implements the 6-phase 5-minute separation rite.
+   Each phase has working interactions + research notes.
+   ======================================================== */
+
+const state = {
+  phase: 0,
+  startTime: null,
+  // phase 1
+  currentPair: 0,
+  pairChoices: [],
+  pairLatencies: [],     // ms from pair-shown to choice
+  pairShownAt: 0,        // timestamp when current pair appeared
+  // phase 2
+  currentExcerpt: 0,
+  emotionTiles: [],
+  excerptPlaying: false,
+  tilesShown: false,
+  // phase 3
+  songs: ['', '', ''],
+  songIndex: 0,
+  // phase 4 — Moment (tap-along + liking)
+  tapTimes: [],          // timestamps of taps within current window
+  tapBPM: null,          // computed BPM
+  likingValue: null,     // 1–7
+  momentStarted: false,
+  // phase 5
+  revealed: false,
+};
+
+const PAIRS = [
+  { axis:'warmth',     a:{label:'WARM',         desc:'Like a room you stayed in',         shape:'low'},  b:{label:'COLD',         desc:'Like glass at dawn',                shape:'high'} },
+  { axis:'density',    a:{label:'DENSE',        desc:'Many things at once',                shape:'thick'}, b:{label:'SPARE',     desc:'A few things, held',                 shape:'thin'} },
+  { axis:'voice',      a:{label:'SUNG',         desc:'A voice that wants to be heard',     shape:'mid'},  b:{label:'WORDLESS',  desc:'Only the room speaks',               shape:'flat'} },
+  { axis:'production', a:{label:'ANALOG',       desc:'Tape hiss, hands on instruments',    shape:'organic'}, b:{label:'DIGITAL', desc:'Synthetic, made of light',           shape:'crystal'} },
+  { axis:'mode',       a:{label:'MAJOR',        desc:'Light walking through',              shape:'rising'}, b:{label:'MINOR',     desc:'A door left open',                   shape:'falling'} },
+  { axis:'tempo',      a:{label:'SLOW',         desc:'Time you can sit inside',            shape:'sparse'}, b:{label:'MID',       desc:'A pulse you can rest against',       shape:'steady'} },
+  { axis:'rhythm',     a:{label:'DRIVING',      desc:'Wants somewhere',                     shape:'urgent'}, b:{label:'FLOATING', desc:'Already arrived',                    shape:'drift'} },
+  { axis:'register',   a:{label:'LOW',          desc:'Felt in the chest',                   shape:'deep'},  b:{label:'HIGH',     desc:'Felt at the temples',                shape:'bright'} },
+  { axis:'space',      a:{label:'REVERBERANT',  desc:'Room as instrument',                  shape:'wet'},   b:{label:'DRY',      desc:'Close, immediate',                   shape:'tight'} },
+];
+
+const EXCERPTS = [
+  { name:'EXCERPT I · SUBLIMITY',  prompt:'What happened in your chest?', tiles:['nostalgic','awed','tender','melancholic','peaceful','defiant'] },
+  { name:'EXCERPT II · LONGING',   prompt:'What happened in your chest?', tiles:['nostalgic','awed','tender','melancholic','peaceful','defiant'] },
+  { name:'EXCERPT III · POWER',    prompt:'What happened in your chest?', tiles:['nostalgic','awed','tender','melancholic','peaceful','defiant'] },
+];
+
+const SONG_PROMPTS = [
+  { line:'A song from when you became someone.',          meta:'YEAR · ARTIST · SONG' },
+  { line:'A song that belongs to one specific person.',   meta:'YEAR · ARTIST · SONG' },
+  { line:'The first song that felt like it was yours — not borrowed.', meta:'YEAR · ARTIST · SONG' },
+];
+
+// Archetypes — internal IDs match project file (taste-extraction-postlistener-orchestra.md);
+// user-facing names use the new poetic register from the literature synthesis.
+const ARCHETYPES = [
+  { id:'mellow_contemplative', name:'The Late-Night Architect',  variation:'2010s · Lo-fi piano',
+    avd:[0.2, 0.5, 0.8],   emotions:['nostalgic','melancholic','peaceful','tender'],
+    pairTendency:{warmth:'a',density:'b',voice:'b',production:'a',mode:'b',tempo:'a',rhythm:'b',register:'a',space:'a'},
+    forer:[
+      'You appreciate music that rewards a second listen — the kind with hidden depth.',
+      'You are drawn to the second half of songs more than the first.',
+      'You resist anything that asks for your full attention before earning it, but you\'ll give an entire night to a song that does.',
+      'You keep your saddest songs for cab rides home.',
+      'You are moved by what other people find too quiet.'
+    ]},
+  { id:'sophisticated_melancholic', name:'The Velvet Mystic',     variation:'1980s · Chamber dream-pop',
+    avd:[0.3, 0.25, 0.9],  emotions:['awed','tender','melancholic','nostalgic'],
+    pairTendency:{warmth:'a',density:'a',voice:'a',production:'a',mode:'b',tempo:'a',rhythm:'b',register:'b',space:'a'},
+    forer:[
+      'You hear the architecture in songs other people only feel.',
+      'You are moved most by music that takes its time getting where it\'s going.',
+      'There is one orchestral passage you have used as armour.',
+      'You would rather a beautiful sad song than a clever happy one — and you don\'t apologise for it.',
+      'You collect chord changes the way other people collect photographs.'
+    ]},
+  { id:'unpretentious_warm', name:'The Hearth-Keeper',            variation:'1970s · Folk Americana',
+    avd:[0.4, 0.75, 0.35], emotions:['tender','peaceful','nostalgic'],
+    pairTendency:{warmth:'a',density:'b',voice:'a',production:'a',mode:'a',tempo:'a',rhythm:'b',register:'a',space:'a'},
+    forer:[
+      'You trust music that sounds like it could be played in a kitchen.',
+      'You\'ve made playlists for people who never knew they were the subject.',
+      'You\'re suspicious of anything too polished, but you forgive it if the voice is true.',
+      'You\'ve cried to a song someone else found cheesy and not been embarrassed.',
+      'You play certain songs only when the light is gold.'
+    ]},
+  { id:'contemporary_groove', name:'The Slow Glow',               variation:'2020s · Downtempo soul',
+    avd:[0.55, 0.7, 0.45], emotions:['tender','peaceful','defiant'],
+    pairTendency:{warmth:'a',density:'b',voice:'a',production:'b',mode:'a',tempo:'b',rhythm:'a',register:'a',space:'b'},
+    forer:[
+      'You move when no one is watching, and you know which songs unlock that.',
+      'You\'re drawn to bass you can feel in the floor.',
+      'You skip the verses on your favourite songs to get back to the part you actually want.',
+      'A drum that swings will get you further with you than a drum that\'s perfect.',
+      'You play music the way other people pour wine — to set the room.'
+    ]},
+  { id:'intense_dark', name:'The Quiet Insurgent',                variation:'2010s · Post-rock minor',
+    avd:[0.85, 0.25, 0.55], emotions:['defiant','melancholic','awed'],
+    pairTendency:{warmth:'b',density:'a',voice:'a',production:'a',mode:'b',tempo:'b',rhythm:'a',register:'a',space:'a'},
+    forer:[
+      'You like music that sounds like it\'s fighting something.',
+      'A song without tension feels to you like a meal without salt.',
+      'You\'ve walked alone through a city at night with one specific song doing the heavy lifting.',
+      'You distrust music that\'s trying to be liked.',
+      'Catharsis matters more to you than comfort.'
+    ]},
+  { id:'euphoric_pop', name:'The Sky-Seeker',                     variation:'2020s · Cinematic awe',
+    avd:[0.8, 0.85, 0.55], emotions:['awed','defiant'],
+    pairTendency:{warmth:'a',density:'a',voice:'a',production:'b',mode:'a',tempo:'b',rhythm:'a',register:'b',space:'a'},
+    forer:[
+      'You want music that arrives somewhere — that earns its ending.',
+      'You\'ve been moved by a song you would never admit to in public.',
+      'You will forgive a lot for a chord change that lifts.',
+      'You like to be reminded that things can be big.',
+      'Hope embarrasses some people; you just let it in.'
+    ]},
+];
+
+const NOTES = [
+  { phase:0, eyebrow:'PHASE 0 · 0:00–0:35', title:'Threshold',
+    sections:[
+      {h:'Function', p:'Van Gennep separation rite. Body arrival before any data extraction. The participant must be different by the time the first question arrives.'},
+      {h:'Mechanic', p:'Black screen. 60Hz drone (silence outperforms calming music — Bernardi 2006). First name + Caretaking-register voice. Hand on chest. Single 6-second guided exhale, then once more.'},
+      {h:'What this extracts', p:'Nothing. This phase exists for the rite, not the database.'},
+      {h:'Why no music', p:'Bernardi, Porta & Sleight (2006, Heart 92:445): silence between musical pauses drove HR, BP, and ventilation BELOW baseline. Background music inhibits ASMR-adjacent intimacy (Barratt et al. 2017).'},
+      {h:'Why hand-on-chest', p:'Embodied analogue of mask-donning at Sleep No More — a physical commitment that marks the threshold (MIT Punchdrunk Between Worlds report 2014).'},
+      {h:'Why a 6-second exhale', p:'Lehrer & Gevirtz 2014: resonance-frequency breathing (~6 bpm) produces dramatic HRV amplitude shifts achievable in fractions of a minute. Two cycles is the floor.'},
+      {h:'Why first-name address', p:'Janata 2009 — second-person, name-bearing language pre-engages dorsal mPFC self-referential processing before any preference probe lands.'},
+    ],
+    refs:[
+      'van Gennep, A. (1909/1960). The Rites of Passage.',
+      'Bernardi, Porta & Sleight (2006). Heart 92:445.',
+      'Lehrer & Gevirtz (2014). Front Psychol 5:756.',
+      'Zaccaro et al. (2018). Front Hum Neurosci 12:353.',
+      'Cardiff, J. (2001). Forty Part Motet.',
+    ] },
+
+  { phase:1, eyebrow:'PHASE 1 · 0:35–2:05', title:'First Pull',
+    sections:[
+      {h:'Function', p:'The labour phase. Each tap is an IKEA-effect deposit. Pairwise audio recovers preference more efficiently than Likert and exploits choice-supportive bias.'},
+      {h:'Mechanic', p:'9 forced-choice audio pairs. Each pair = two 8s clips spanning a polar contrast on one library axis (warmth, density, voicing, production, mode, tempo, rhythm, register, space). Tap the one you would keep. Chosen clip continues briefly — small reward, choice-supportive bias activation.'},
+      {h:'Extracts', p:'9-bit signal across AVD axes + 3 production-aesthetic dimensions. Plus implicit signals: skip rate, decision latency.'},
+      {h:'Voice', p:'Sparse. A single comment between pairs 3 and 6 — operational transparency (Buell & Norton 2011). “You are choosing the warmer ones — interesting.”'},
+      {h:'Why 9 not 25', p:'24-track decision needs ~4.6 bits. Nine well-spanned pairs supply ample signal under adaptive selection (Golbandi et al. 2010), and fatigue caps trial budget.'},
+      {h:'Why audio not words', p:'Nave et al. (2018, Psych Science): audio reactions to 25 unfamiliar 15s excerpts predict Big Five at r ≈ 0.16–0.21 — meaningfully exceeding STOMP-only baselines. Word-pair Spectrum was psychometrically broken on A/D.'},
+    ],
+    refs:[
+      'Nave et al. (2018). Psychological Science 29:1145.',
+      'Bradley & Terry (1952). Biometrika 39:324.',
+      'Norton, Mochon & Ariely (2012). J Consumer Psych 22:453.',
+      'Buell & Norton (2011). Management Science 57:1564.',
+      'Mather, Shafir & Johnson (2000). Psych Science 11:132.',
+      'Golbandi, Koren & Lempel (2010). CIKM.',
+    ] },
+
+  { phase:2, eyebrow:'PHASE 2 · 2:05–2:55', title:'GEMS Probe',
+    sections:[
+      {h:'Function', p:'Discrete-emotion capture that AVD geometrically cannot recover. AVD cannot disambiguate nostalgia from peacefulness or awe from generic high-arousal positive — the exact emotions PostListener wants to evoke.'},
+      {h:'Mechanic', p:'Three 15s emotionally distinctive excerpts (a Sublimity exemplar, a Tenderness/longing exemplar, a Tension/Power exemplar). After each: six emotion-word tiles drawn from GEMS-9 + Cowen-13 — multi-select. Tiles fade after 6s — bounded labour.'},
+      {h:'Extracts', p:'Discrete-emotion vector: nostalgia, awe, tenderness, melancholy, peacefulness, defiance affinities.'},
+      {h:'Voice', p:'Between excerpts 2 and 3, Elevated register: “You are letting the sad ones land. Most people skip past them.” Soft Forer probe (flattering specificity later verified against the actual tap pattern).'},
+      {h:'Why time-pressure tile fade', p:'Buechel & Janiszewski (2014, JCR): bounded structured effort produces more attachment than open-ended free design. 6 seconds is enough to feel, not enough to overthink.'},
+      {h:'Why three excerpts', p:'Vuoskoski & Eerola 2011: GEMS shows strongest sensitivity to individual differences. Three well-spanned excerpts × six tiles = 18-bit emotion vector — sufficient for variation-level discrimination.'},
+    ],
+    refs:[
+      'Zentner, Grandjean & Scherer (2008). Emotion 8:494.',
+      'Coutinho & Scherer (2017). Music Perception 34:371.',
+      'Cowen et al. (2020). PNAS 117:1924.',
+      'Eerola & Vuoskoski (2011). Psych of Music 39:18.',
+      'Furnham & Schofield (1987). J of Soc Behav & Pers 2:309.',
+      'Buechel & Janiszewski (2014). JCR 40:960.',
+    ] },
+
+  { phase:3, eyebrow:'PHASE 3 · 2:55–4:10', title:'Three Songs You Carry',
+    sections:[
+      {h:'Function', p:'Reminiscence-bump module. The deepest engagement window — the listener is now in calm, mPFC-engaged, self-referential mode. Janata\'s lesion evidence (Belfi et al. 2018) tells us this is when music\'s identity-binding power is maximal.'},
+      {h:'Mechanic', p:'Three sequential prompts borrowing Rathbone\'s "I am…" identity framings. Text autocompletes via metadata API. Soft pacing — voice introduces each prompt; user types; taps done.'},
+      {h:'Extracts', p:'Era (release-year metadata); genre cluster; production aesthetic (audio-feature lookup); identity-binding intensity; cohort/generational position. This is where era and instrumentation seed get their richest signal.'},
+      {h:'Voice', p:'Caretaking register: "Take your time. The wrong one would feel wrong." Authenticity framing — inverts the assessor-tested-subject power relation that triggers performance anxiety.'},
+      {h:'Why middle placement, not front', p:'Janata 2007\'s 30% MEAM yield was achieved in already-receptive participants. Front-loading hits a stressed user before parasympathetic shift, producing shallow recall and weak identity-binding.'},
+      {h:'Why three, not five', p:'Rathbone et al. used 5; Jakubowski 2025 confirms small sets (3–5) yield reliable individual profiles. Three is the empirically supported floor that still recovers cohort and stylistic markers.'},
+      {h:'Why these three prompts', p:'Mapped to Rathbone\'s identity-formation taxonomy: (a) becoming-someone (formative period), (b) one-specific-person (relational binding), (c) first-mine-not-borrowed (taste autonomy). Together: who you became, who you became with, and the moment you stopped inheriting.'},
+    ],
+    refs:[
+      'Krumhansl & Zupnick (2013). Psychological Science 24:2057.',
+      'Janata (2009). Cerebral Cortex 19:2579.',
+      'Janata, Tomic & Rakowski (2007). Memory 15:845.',
+      'Belfi, Karlan & Tranel (2018). Psychomusicology 28:201.',
+      'Rathbone, O\'Connor & Moulin (2017). Memory & Cognition 45:137.',
+      'Jakubowski et al. (2020). Music & Science 3:1.',
+      'North & Hargreaves (1999). Psych of Music 27:71.',
+    ] },
+
+  { phase:4, eyebrow:'PHASE 4 · 4:10–4:35', title:'Moment',
+    sections:[
+      {h:'Function', p:'Tap-along + liking probe. Restores the motor modality the original Moment phase carried, and turns the tap into operational transparency: the system shows it has provisionally chosen an archetype and is auditioning a track with the participant.'},
+      {h:'Mechanic', p:'Tap zone shows the provisional archetype + variation. Participant taps any rhythm; BPM computed from inter-tap intervals (median of last few). After 4+ taps, a 7-point liking probe appears: "How does this one sit with you?" Choice advances to Mirror.'},
+      {h:'Extracts', p:'Tempo class (BPM bucket: low <80, mid 80–120, high >120). Liking value 1–7 (Hurley-corrected disambiguation: separates groove/arousal from preference).'},
+      {h:'Voice', p:'Caretaking register: "This one\'s been waiting for you. Tap with it." After tap convergence, silent.'},
+      {h:'Why this replaces the slider', p:'The earlier slider was pure placebo-affordance (Vaccaro 2018) — it controlled nothing because we have no real-time generation. The Moment phase is operational transparency that does real work: BPM signal, liking signal, AND the labour-illusion of "auditioning" a track in real time (Buell & Norton 2011).'},
+      {h:'Why a liking probe was missing before', p:'Janata\'s groove literature shows tap-tempo conflates arousal with valence and liking. Without a separate liking item, BPM signal is uninterpretable — Hurley et al. 2014 establishes this. The 7-point Likert here is the project file\'s prescribed fix.'},
+      {h:'What the BPM does downstream', p:'Modulates within-archetype variation selection. A high-BPM tapper inside The Hearth-Keeper archetype gets the brisker variation (e.g., 1970s John Prine vs Iron & Wine ambient).'},
+    ],
+    refs:[
+      'Hurley, Snyder & Janata (2014). Frontiers in Psychology 5:1252.',
+      'Janata, Tomic & Haberman (2012). JEP General 141:54.',
+      'Vaccaro et al. (2018). CHI.',
+      'Buell & Norton (2011). Management Science 57:1564.',
+      'Stillman, Shen & Ferguson (2018). TICS 22:1.',
+    ] },
+
+  { phase:5, eyebrow:'PHASE 5 · 4:35–5:00', title:'The Mirror',
+    sections:[
+      {h:'Function', p:'The aggregation turn that completes separation and hands the listener into the liminal phase. This is where felt personalization is born — the highest-leverage moment in the entire flow.'},
+      {h:'Mechanic', p:'Black background. Named archetype + variation tag in elegant typography. Admirer voice in Elevated register reads back a 60-second Forer-balanced profile (3 flattering claims, 1 mild challenge, 1 specific-but-unfalsifiable image). Phase 1 picks appear faintly behind text — legitimacy laundering. Soft fade-up of the matched track\'s first second begins sub-audible. Voice closes: "I have something for you." Track plays.'},
+      {h:'Forer recipe', p:'Furnham & Schofield 1987: positive tone, base-rate commonality, perceived personalization, authority of evaluator, vagueness allowing self-projection, the "at times" modifier.'},
+      {h:'Why specific-but-unfalsifiable images', p:'Co-Star idiom. "You keep your saddest songs for cab rides home" is universal in pattern but specific in image — confirmation bias supplies the autobiographical detail.'},
+      {h:'Why archetype as take-home artifact', p:'Co-Star/BuzzFeed share-loop affordance. Compresses 5 minutes of self-disclosure into a portable identity token.'},
+      {h:'Why unbroken transition into track', p:'Preserves affect at peak before any disconfirmation can occur. The Mirror\'s Forer payoff is at maximum amplitude when the track begins.'},
+      {h:'No peer-reviewed test of music-Barnum exists', p:'Original empirical contribution available — a planned subscale comparing music-taste Barnum acceptance vs personality-trait Barnum acceptance would be a clean thesis contribution.'},
+    ],
+    refs:[
+      'Forer (1949). J Abn & Soc Psych 44:118.',
+      'Furnham & Schofield (1987). J of Soc Behav & Pers 2:309.',
+      'Snyder & Shenkel (1977). Psychology Today.',
+      'Glick, Gottesman & Jolton (1989). Personality and Soc Psych Bulletin 15:572.',
+      'Li (2016). Computers in Human Behavior 54:25.',
+      'Tam & Ho (2006). MIS Quarterly 30:865.',
+      'Pataranutaporn et al. (2023). Nature Machine Intelligence 5:1076.',
+    ] },
+];
+
+/* ============== rendering ============== */
+
+function render(){
+  const stage = document.getElementById('stage');
+  stage.innerHTML='';
+  const wrap = document.createElement('div');
+  wrap.className='scene';
+  if(state.phase===0) wrap.appendChild(renderThreshold());
+  if(state.phase===1) wrap.appendChild(renderPairwise());
+  if(state.phase===2) wrap.appendChild(renderGems());
+  if(state.phase===3) wrap.appendChild(renderThreeSongs());
+  if(state.phase===4) wrap.appendChild(renderMoment());
+  if(state.phase===5) wrap.appendChild(renderMirror());
+  stage.appendChild(wrap);
+  updateTimeline();
+  updateNotes();
+  updateControls();
+}
+
+function renderThreshold(){
+  const root = document.createElement('div');
+  root.className='threshold';
+  root.innerHTML = `
+    <div class="name">Knih.</div>
+    <div class="breath-ring active">
+      <svg viewBox="0 0 200 200">
+        <circle class="bg" cx="100" cy="100" r="90"/>
+        <circle class="fg" cx="100" cy="100" r="90"/>
+      </svg>
+      <div class="pulse">EXHALE — 6 SECONDS</div>
+    </div>
+    <p class="voice-line show" id="vline">For the next sixteen minutes you are not your inbox.<br/>Place one hand on your chest. We're going to do this together.<br/>Breathe out — slowly — through your mouth.</p>
+    <div class="threshold-instructions">— ONCE MORE —</div>
+  `;
+  return root;
+}
+
+function renderPairwise(){
+  const pair = PAIRS[state.currentPair];
+  const root = document.createElement('div');
+  root.className='pairwise';
+  root.innerHTML = `
+    <div class="pair-counter">PAIR <strong>${state.currentPair+1}</strong> / ${PAIRS.length}  ·  THE FIRST PULL</div>
+    <h2 class="pair-prompt">Which one would you keep?</h2>
+    <div class="pair-cards">
+      <div class="pair-card" data-side="a">
+        <div class="label">${pair.a.label}</div>
+        <div class="waveform" data-shape="${pair.a.shape}"></div>
+        <div class="descriptor">${pair.a.desc}</div>
+      </div>
+      <div class="pair-card" data-side="b">
+        <div class="label">${pair.b.label}</div>
+        <div class="waveform" data-shape="${pair.b.shape}"></div>
+        <div class="descriptor">${pair.b.desc}</div>
+      </div>
+    </div>
+  `;
+  // generate waveforms
+  setTimeout(()=>{
+    root.querySelectorAll('.waveform').forEach(wf=>{
+      const shape = wf.dataset.shape;
+      const bars = 36;
+      let html='';
+      for(let i=0;i<bars;i++){
+        let h = wfHeight(shape, i, bars);
+        html += `<div class="bar" style="height:${h}%"></div>`;
+      }
+      wf.innerHTML = html;
+    });
+    state.pairShownAt = performance.now();        // start latency clock
+    root.querySelectorAll('.pair-card').forEach(card=>{
+      card.addEventListener('click',()=>{
+        const latency = performance.now() - state.pairShownAt;
+        state.pairLatencies[state.currentPair] = latency;
+        root.querySelectorAll('.pair-card').forEach(c=>c.classList.remove('chosen'));
+        card.classList.add('chosen');
+        state.pairChoices[state.currentPair] = card.dataset.side;
+        setTimeout(()=>{
+          if(state.currentPair < PAIRS.length-1){
+            state.currentPair++;
+            render();
+          } else {
+            state.phase = 2;
+            render();
+          }
+        }, 800);
+      });
+    });
+  }, 30);
+  return root;
+}
+
+function wfHeight(shape, i, n){
+  const t = i/n;
+  switch(shape){
+    case 'low':     return 20 + 50*Math.sin(t*Math.PI*2)*Math.exp(-t*0.6);
+    case 'high':    return 35 + 35*Math.sin(t*Math.PI*8);
+    case 'thick':   return 55 + 35*Math.sin(t*Math.PI*12)*Math.cos(t*Math.PI*3);
+    case 'thin':    return 15 + 25*Math.sin(t*Math.PI*4);
+    case 'mid':     return 30 + 40*Math.sin(t*Math.PI*5);
+    case 'flat':    return 25 + 8*Math.sin(t*Math.PI*15);
+    case 'organic': return 25 + 35*Math.sin(t*Math.PI*3) + 12*Math.sin(t*Math.PI*9);
+    case 'crystal': return 45 + 30*Math.abs(Math.sin(t*Math.PI*6));
+    case 'rising':  return 15 + 70*t + 10*Math.sin(t*Math.PI*8);
+    case 'falling': return 75 - 60*t + 10*Math.sin(t*Math.PI*8);
+    case 'sparse':  return 20 + 30*(i%6===0?1:0.3);
+    case 'steady':  return 40 + 20*Math.sin(t*Math.PI*8);
+    case 'urgent':  return 50 + 35*Math.abs(Math.sin(t*Math.PI*16));
+    case 'drift':   return 35 + 15*Math.sin(t*Math.PI*1.5);
+    case 'deep':    return 60 + 25*Math.sin(t*Math.PI*2.5);
+    case 'bright':  return 25 + 35*Math.sin(t*Math.PI*14);
+    case 'wet':     return 35 + 35*Math.sin(t*Math.PI*4)*Math.exp(-t*0.4);
+    case 'tight':   return 50 + 15*Math.sin(t*Math.PI*20);
+    default:        return 30 + 30*Math.sin(t*Math.PI*4);
+  }
+}
+
+function renderGems(){
+  const ex = EXCERPTS[state.currentExcerpt];
+  if(!state.emotionTiles[state.currentExcerpt]) state.emotionTiles[state.currentExcerpt] = [];
+  const root = document.createElement('div');
+  root.className='gems';
+  root.innerHTML = `
+    <div class="excerpt-counter">${ex.name}  ·  <strong>${state.currentExcerpt+1}</strong>/${EXCERPTS.length}</div>
+    <h2 class="gems-prompt">Listen.</h2>
+    <div class="visualizer playing" id="vis">
+      <svg viewBox="0 0 300 300">
+        ${[...Array(8)].map((_,i)=>`<circle class="vis-ring" cx="150" cy="150" r="${30 + i*16}" style="animation-delay:${i*0.18}s"/>`).join('')}
+      </svg>
+      <div class="center-label">15 SEC EXCERPT</div>
+    </div>
+    <div class="tile-prompt" id="tp">${ex.prompt}  ·  TAP ANY THAT APPLY</div>
+    <div class="tile-grid" id="tg">
+      ${ex.tiles.map(t=>`<div class="tile" data-tile="${t}">${t}</div>`).join('')}
+    </div>
+    <div class="tile-fade-bar" id="fb"><div class="fill"></div></div>
+  `;
+  setTimeout(()=>{
+    document.getElementById('tp').classList.add('show');
+    document.getElementById('tg').classList.add('show');
+    document.getElementById('fb').classList.add('show');
+    root.querySelectorAll('.tile').forEach(tile=>{
+      tile.addEventListener('click',()=>{
+        const t = tile.dataset.tile;
+        const list = state.emotionTiles[state.currentExcerpt];
+        if(list.includes(t)){
+          tile.classList.remove('selected');
+          state.emotionTiles[state.currentExcerpt] = list.filter(x=>x!==t);
+        } else {
+          tile.classList.add('selected');
+          list.push(t);
+        }
+      });
+    });
+    setTimeout(()=>{
+      if(state.currentExcerpt < EXCERPTS.length-1){
+        state.currentExcerpt++;
+        render();
+      } else {
+        state.phase = 3;
+        render();
+      }
+    }, 8400);
+  }, 1200);
+  return root;
+}
+
+function renderThreeSongs(){
+  const idx = state.songIndex;
+  const p = SONG_PROMPTS[idx];
+  const root = document.createElement('div');
+  root.className='threesongs';
+  root.innerHTML = `
+    <div class="ts-eyebrow">SONG <strong>${idx+1}</strong> / 3  ·  THREE YOU CARRY</div>
+    <h2 class="ts-prompt">${p.line}</h2>
+    <div class="ts-input-wrap">
+      <input class="ts-input" id="songInput" placeholder="type a song, an artist, a feeling…" value="${state.songs[idx]}" autocomplete="off"/>
+      <div class="ts-meta">${p.meta}</div>
+    </div>
+    <p class="ts-voice">"Take your time. The wrong one would feel wrong."</p>
+  `;
+  setTimeout(()=>{
+    const input = document.getElementById('songInput');
+    input.focus();
+    input.addEventListener('keydown',e=>{
+      if(e.key==='Enter' && input.value.trim()){
+        state.songs[idx] = input.value.trim();
+        if(state.songIndex < 2){
+          state.songIndex++;
+          render();
+        } else {
+          state.phase = 4;
+          render();
+        }
+      }
+    });
+  }, 200);
+  return root;
+}
+
+function renderMoment(){
+  // Provisional archetype is computed from prior phases — used to frame
+  // the voice line ("auditioning a track for you") and gives operational
+  // transparency: the system shows it's already considering a candidate.
+  const provisional = computeProvisionalArchetype();
+  const root = document.createElement('div');
+  root.className='moment';
+  root.innerHTML = `
+    <div class="mom-eyebrow">PHASE <strong>4</strong> · MOMENT  ·  THE AUDITION</div>
+    <h2 class="mom-prompt">Tap with this — find the pulse you want.</h2>
+    <div class="mom-tap-zone" id="tapZone">
+      <div class="mom-tap-pulse" id="tapPulse"></div>
+      <div class="tap-instruction">
+        <div class="tap-bpm" id="tapBPM">— —</div>
+        <div class="tap-bpm-label">BPM · TAP TO BEGIN</div>
+        <div class="tap-hint" id="tapHint">TAP HERE · ANY RHYTHM YOU WANT</div>
+      </div>
+    </div>
+    <div class="mom-track-meta">
+      AUDITIONING · <strong>${provisional.name.toUpperCase()}</strong> · ${provisional.variation.toUpperCase()}
+    </div>
+    <p class="mom-voice-line">"This one's been waiting for you. Tap with it."</p>
+
+    <div class="mom-liking" id="likingBlock">
+      <div class="mom-liking-prompt">How does this one sit with you?</div>
+      <div class="mom-liking-scale" id="likingScale">
+        ${[1,2,3,4,5,6,7].map(n=>`<button class="mom-liking-dot" data-v="${n}">${n}</button>`).join('')}
+      </div>
+      <div class="mom-liking-anchors"><span>NOT FOR ME</span><span>YES — THIS</span></div>
+    </div>
+  `;
+
+  setTimeout(()=>{
+    const zone = document.getElementById('tapZone');
+    const pulse = document.getElementById('tapPulse');
+    const bpmEl = document.getElementById('tapBPM');
+    const hintEl = document.getElementById('tapHint');
+    const liking = document.getElementById('likingBlock');
+    state.tapTimes = [];
+
+    function handleTap(e){
+      const rect = zone.getBoundingClientRect();
+      const x = (e.clientX || (e.touches && e.touches[0]?.clientX) || rect.left + rect.width/2) - rect.left;
+      const y = (e.clientY || (e.touches && e.touches[0]?.clientY) || rect.top + rect.height/2) - rect.top;
+      pulse.style.left = `${x}px`;
+      pulse.style.top = `${y}px`;
+      pulse.classList.remove('flash');
+      void pulse.offsetWidth;
+      pulse.classList.add('flash');
+
+      const now = performance.now();
+      state.tapTimes.push(now);
+      // keep last 6 taps
+      if(state.tapTimes.length > 6) state.tapTimes.shift();
+      zone.classList.add('tapping');
+
+      if(state.tapTimes.length >= 2){
+        // BPM from inter-tap intervals (median of last few)
+        const intervals = [];
+        for(let i=1; i<state.tapTimes.length; i++){
+          intervals.push(state.tapTimes[i] - state.tapTimes[i-1]);
+        }
+        const sorted = [...intervals].sort((a,b)=>a-b);
+        const median = sorted[Math.floor(sorted.length/2)];
+        const bpm = Math.round(60000/median);
+        if(bpm > 30 && bpm < 220){
+          state.tapBPM = bpm;
+          bpmEl.textContent = bpm;
+          hintEl.textContent = state.tapTimes.length < 4
+            ? 'KEEP GOING'
+            : 'GOOD — HOLD THERE';
+        }
+      } else {
+        hintEl.textContent = 'AGAIN';
+      }
+
+      // After 4+ taps, reveal liking probe
+      if(state.tapTimes.length >= 4){
+        liking.classList.add('show');
+      }
+    }
+
+    zone.addEventListener('click', handleTap);
+    zone.addEventListener('touchstart', e => { e.preventDefault(); handleTap(e); });
+
+    // Liking dot selection
+    document.querySelectorAll('.mom-liking-dot').forEach(dot=>{
+      dot.addEventListener('click',()=>{
+        document.querySelectorAll('.mom-liking-dot').forEach(d=>d.classList.remove('chosen'));
+        dot.classList.add('chosen');
+        state.likingValue = parseInt(dot.dataset.v);
+        setTimeout(()=>{
+          state.phase = 5;
+          render();
+        }, 700);
+      });
+    });
+  }, 30);
+  return root;
+}
+
+/* ============== scoring & helpers ============== */
+
+// Provisional archetype: scoring after Phases 1 & 2; called in Phase 4 to
+// frame the audition + later finalised in Phase 5 with all signals.
+function scoreArchetypes(){
+  const PAIR_AXES = ['warmth','density','voice','production','mode','tempo','rhythm','register','space'];
+
+  // 1. Compute log-RT z-scores within participant for confidence weighting
+  //    (Stillman 2020: long dwell = decisional conflict, not preference strength)
+  const rts = state.pairLatencies.filter(x=>x).map(x=>Math.log(x));
+  const mean = rts.length ? rts.reduce((a,b)=>a+b,0)/rts.length : 0;
+  const sd = rts.length ? Math.sqrt(rts.reduce((s,x)=>s+(x-mean)**2,0)/rts.length) : 1;
+
+  function confWeight(latency){
+    if(!latency) return 1;
+    const z = (Math.log(latency) - mean) / (sd || 1);
+    if(z > 1.5) return 0.4;          // very long dwell — under-weight
+    if(z > 0.5) return 0.7;          //   long dwell — modest discount
+    if(z < -0.5) return 1.1;         //  fast/confident — slight boost
+    return 1.0;
+  }
+
+  // 2. Score each archetype against Phase 1 pair choices
+  const scores = ARCHETYPES.map(arc=>{
+    let pairScore = 0, pairMax = 0;
+    state.pairChoices.forEach((choice,i)=>{
+      if(!choice) return;
+      const axis = PAIR_AXES[i];
+      const expected = arc.pairTendency[axis];
+      const w = confWeight(state.pairLatencies[i]);
+      pairMax += w;
+      if(choice === expected) pairScore += w;
+    });
+
+    // 3. Score against Phase 2 emotion tiles (Cowen 13 / GEMS 9)
+    let emoScore = 0, emoMax = 0;
+    state.emotionTiles.forEach(list=>{
+      if(!list) return;
+      list.forEach(tile=>{
+        emoMax += 1;
+        if(arc.emotions.includes(tile)) emoScore += 1;
+      });
+    });
+    if(emoMax === 0) emoMax = 1;  // avoid div0
+
+    const pairFrac = pairMax ? pairScore/pairMax : 0;
+    const emoFrac = emoScore/emoMax;
+    // 70/30 weighting — pair choices are more reliable than emotion-tile multi-select
+    const total = 0.7 * pairFrac + 0.3 * emoFrac;
+    return { ...arc, score: total, pairFrac, emoFrac };
+  });
+
+  scores.sort((a,b)=>b.score - a.score);
+  return scores;
+}
+
+function computeProvisionalArchetype(){
+  const ranked = scoreArchetypes();
+  return ranked[0] || ARCHETYPES[0];
+}
+
+// Time-of-day conditional Admirer line — single passive sense, disproportionate uncanny effect
+function getTimeOfDayLine(){
+  const hour = new Date().getHours();
+  if(hour >= 23 || hour < 5)  return 'You came to me at the loneliest hour. That always means something.';
+  if(hour >= 5 && hour < 8)   return 'You got here early. The morning ones know what they want.';
+  if(hour >= 8 && hour < 12)  return 'Morning is honest with you. I noticed.';
+  if(hour >= 12 && hour < 14) return 'The middle of the day is hard for music. You came anyway.';
+  if(hour >= 14 && hour < 18) return 'Afternoon — the patient hour. You\'re not in a hurry.';
+  if(hour >= 18 && hour < 21) return 'You found the gap between things. Good.';
+  return 'It\'s late, but not too late. The good listening hour.';
+}
+
+function renderMirror(){
+  const ranked = scoreArchetypes();
+  const a = ranked[0];
+  const confidence = (a.score * 100).toFixed(0);
+  const timeLine = getTimeOfDayLine();
+
+  const root = document.createElement('div');
+  root.className='mirror';
+  root.innerHTML = `
+    <div class="mirror-eyebrow reveal-1">— A NAME FOR THIS HOUR —</div>
+    <h1 class="mirror-archetype reveal-2">${a.name}</h1>
+    <div class="mirror-variation reveal-3">${a.variation}</div>
+    <div class="mirror-divider reveal-4"></div>
+    ${a.forer.map((line,i)=>{
+      const cls = i===3 ? 'dim' : '';
+      return `<p class="mirror-line ${cls} reveal-${5+i}">${line}</p>`;
+    }).join('')}
+    <p class="mirror-line reveal-10" style="color:var(--ember);font-size:18px;margin-top:32px;">${timeLine}</p>
+    <p class="mirror-handoff reveal-11">I have something for you.</p>
+  `;
+  return root;
+}
+
+/* ============== controls / nav ============== */
+
+function nextPhase(){
+  if(state.phase < 5){
+    if(state.phase===0){ state.phase=1; }
+    else if(state.phase===1){ state.phase=2; }
+    else if(state.phase===2){ state.phase=3; }
+    else if(state.phase===3){ state.phase=4; }
+    else if(state.phase===4){ state.phase=5; }
+    render();
+  }
+}
+function prevPhase(){
+  if(state.phase > 0){
+    state.phase--;
+    if(state.phase===1){ state.currentPair = 0; state.pairChoices = []; state.pairLatencies = []; }
+    if(state.phase===2){ state.currentExcerpt = 0; state.emotionTiles = []; }
+    if(state.phase===3){ state.songIndex = 0; }
+    if(state.phase===4){ state.tapTimes = []; state.tapBPM = null; state.likingValue = null; }
+    render();
+  }
+}
+function reset(){
+  state.phase = 0;
+  state.currentPair = 0;
+  state.pairChoices = [];
+  state.pairLatencies = [];
+  state.currentExcerpt = 0;
+  state.emotionTiles = [];
+  state.songIndex = 0;
+  state.songs = ['','',''];
+  state.tapTimes = [];
+  state.tapBPM = null;
+  state.likingValue = null;
+  render();
+}
+function updateControls(){
+  document.getElementById('prevBtn').disabled = state.phase===0;
+  document.getElementById('nextBtn').disabled = state.phase===5;
+}
+function updateTimeline(){
+  document.querySelectorAll('.tl-step').forEach((step,i)=>{
+    step.classList.remove('active','done');
+    if(i<state.phase) step.classList.add('done');
+    if(i===state.phase) step.classList.add('active');
+    step.onclick = ()=>{ state.phase=i; render(); };
+  });
+}
+function updateTimer(){
+  if(!state.startTime) state.startTime = Date.now();
+  const elapsed = Math.floor((Date.now()-state.startTime)/1000);
+  const target = 300; // 5 min
+  const cur = Math.min(elapsed, target);
+  const m = String(Math.floor(cur/60)).padStart(2,'0');
+  const s = String(cur%60).padStart(2,'0');
+  document.getElementById('timer').textContent = `${m}:${s} / 05:00`;
+}
+setInterval(updateTimer, 1000);
+
+/* ============== notes drawer ============== */
+
+function toggleNotes(){
+  document.getElementById('notesDrawer').classList.toggle('open');
+}
+function updateNotes(){
+  const note = NOTES[state.phase];
+  const c = document.getElementById('notesContent');
+  if(!note){ c.innerHTML=''; return; }
+
+  // Library coverage — live archetype scoring (visible from Phase 1 onward)
+  let libCoverage = '';
+  if(state.phase >= 1){
+    const ranked = scoreArchetypes();
+    const top = ranked[0]?.score || 0;
+    const margin = top - (ranked[1]?.score || 0);
+    const viableCount = ranked.filter(a=>a.score > top - 0.2).length;
+    const tracksLeft = viableCount * 4; // 4 variations per archetype
+
+    libCoverage = `
+      <div class="lib-coverage">
+        <h4>Library Coverage</h4>
+        <div class="lib-summary">
+          24 tracks · <strong>${tracksLeft}</strong> still viable · margin <strong>${(margin*100).toFixed(0)}%</strong> over runner-up
+        </div>
+        <ul class="arc-list">
+          ${ranked.map((a,i)=>{
+            let cls = 'pruned';
+            if(i === 0) cls = 'leading';
+            else if(a.score > top - 0.2) cls = 'viable';
+            return `<li class="${cls}">
+              <span class="arc-name">${a.name}</span>
+              <span class="arc-score">${(a.score*100).toFixed(0)}%</span>
+            </li>`;
+          }).join('')}
+        </ul>
+      </div>
+    `;
+  }
+
+  // Divergence note — only on Phase 0 (orientation moment) so it's visible once
+  const divergence = (state.phase === 0) ? `
+    <div class="divergence">
+      <h4>Divergence from project file</h4>
+      <p>This redesign updates the original 6-phase profiling per the literature synthesis. Departures: archetype renaming (internal IDs preserved as <em>mellow_contemplative</em>, <em>sophisticated_melancholic</em>, etc.); GEMS-9/Cowen-13 discrete-emotion layer added on top of AVD; Spectrum word-pairs replaced with audio forced-choice (Phase 1); Textures merged into Phase 1; threshold rite (Phase 0) and Forer mirror (Phase 5) added. The Moment phase is restored from project file as Phase 4 with the prescribed Hurley liking probe.</p>
+    </div>
+  ` : '';
+
+  c.innerHTML = `
+    <div class="notes-eyebrow">${note.eyebrow}</div>
+    <div class="notes-title">${note.title}</div>
+    ${note.sections.map(s=>`
+      <div class="notes-section">
+        <h4>${s.h}</h4>
+        <p>${s.p}</p>
+      </div>
+    `).join('')}
+    ${divergence}
+    ${libCoverage}
+    ${note.refs ? `
+      <div class="citations">
+        <h4>Citations</h4>
+        ${note.refs.map(r=>`<p>${r}</p>`).join('')}
+      </div>
+    ` : ''}
+  `;
+}
+
+/* ============== init ============== */
+
+render();
+
+</script>
+</body>
+</html>
