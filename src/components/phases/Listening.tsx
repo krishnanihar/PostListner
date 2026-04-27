@@ -28,7 +28,7 @@ export function Listening() {
 
   useEffect(() => {
     // Auto-advance after 12s in prototype mode so the arc is walkable.
-    const id = window.setTimeout(() => setPhase(9), 12_000);
+    const id = window.setTimeout(() => setPhase(10), 12_000);
     return () => clearTimeout(id);
   }, [setPhase]);
 

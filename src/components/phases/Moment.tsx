@@ -5,7 +5,9 @@ import { Score, MARGIN_X, VB_W } from '@/score/Score';
 import { Downbeat, Tactus } from '@/score/marks';
 import { COLORS, FONTS } from '@/score/tokens';
 import { useStore } from '@/lib/store';
-import { scoreArchetypes } from '@/lib/scoring';
+import { computeAVD, pickVariation, scoreArchetypes } from '@/lib/scoring';
+import { AdmirerLine } from '@/components/AdmirerLine';
+import { AmbientTrack } from '@/components/AmbientTrack';
 
 const LIKING_SCALE = [1, 2, 3, 4, 5, 6, 7] as const;
 const STAVE_Y = 290;
@@ -24,13 +26,30 @@ export function Moment() {
   const setLiking = useStore((s) => s.setLiking);
   const setPhase = useStore((s) => s.setPhase);
 
+  const songYears = useStore((s) => s.songYears);
+
   const provisional = useMemo(
     () => scoreArchetypes(pairChoices, pairLatencies, emotionTiles)[0],
     [pairChoices, pairLatencies, emotionTiles]
   );
+  const provisionalVariation = useMemo(() => {
+    const { vector } = computeAVD(pairChoices, pairLatencies);
+    return pickVariation(provisional, {
+      avd: vector,
+      songYears: songYears.filter((y): y is number => !!y),
+      tapBPM,
+      emotionTiles: emotionTiles.flat(),
+      // No stochasticity at audition — the listener is told what's queued.
+      epsilon: 0,
+    });
+  }, [provisional, pairChoices, pairLatencies, songYears, tapBPM, emotionTiles]);
 
   const sessionStart = useRef(performance.now());
   const [, force] = useState(0);
+  const [pulse, setPulse] = useState<{ x: number; y: number; id: number } | null>(null);
+  const [tapping, setTapping] = useState(false);
+  const pulseIdRef = useRef(0);
+  const tappingTimeoutRef = useRef<number | null>(null);
 
   // place tap dots evenly across the stave so the rhythm reads
   const tapDots = tapTimes.map((_, i) => {
@@ -49,9 +68,19 @@ export function Moment() {
     if (bpm > 30 && bpm < 220) setBPM(bpm);
   }, [tapTimes, setBPM]);
 
-  const onTap = () => {
+  const onTap = (e: React.PointerEvent<HTMLButtonElement>) => {
     pushTap(performance.now());
     force((n) => n + 1);
+    const rect = e.currentTarget.getBoundingClientRect();
+    pulseIdRef.current += 1;
+    setPulse({
+      x: e.clientX - rect.left,
+      y: e.clientY - rect.top,
+      id: pulseIdRef.current,
+    });
+    setTapping(true);
+    if (tappingTimeoutRef.current) window.clearTimeout(tappingTimeoutRef.current);
+    tappingTimeoutRef.current = window.setTimeout(() => setTapping(false), 700);
   };
 
   const hint =
@@ -80,25 +109,51 @@ export function Moment() {
           ? 'how does this sit with you?'
           : "this one's been waiting for you"
       }
-      footer={`auditioning · ${provisional.name.toLowerCase()} · ${provisional.variation.toLowerCase()}`}
+      footer={`auditioning · ${provisional.name.toLowerCase()} · ${provisionalVariation.tag.toLowerCase()}`}
       staves={[{ y: STAVE_Y }]}
       overlay={
         <>
           <button
             type="button"
-            onClick={onTap}
+            onPointerDown={onTap}
             aria-label="Tap rhythm"
             style={{
               position: 'absolute',
-              top: 0,
-              left: 0,
-              right: 0,
-              height: '70%',
+              top: '12%',
+              left: '6%',
+              right: '6%',
+              height: '54%',
               background: 'transparent',
-              border: 'none',
+              border: `0.5px solid ${tapping ? COLORS.scoreAmber : COLORS.inkCreamSecondary}`,
+              borderColor: tapping ? COLORS.scoreAmber : COLORS.inkCreamSecondary,
+              opacity: tapping ? 1 : 0.55,
               cursor: 'pointer',
+              padding: 0,
+              overflow: 'hidden',
+              transition: 'opacity 0.3s, border-color 0.3s',
             }}
-          />
+          >
+            {pulse && (
+              <span
+                key={pulse.id}
+                aria-hidden
+                style={{
+                  position: 'absolute',
+                  left: pulse.x,
+                  top: pulse.y,
+                  width: 12,
+                  height: 12,
+                  marginLeft: -6,
+                  marginTop: -6,
+                  borderRadius: '50%',
+                  border: `1px solid ${COLORS.scoreAmber}`,
+                  background: 'transparent',
+                  pointerEvents: 'none',
+                  animation: 'tapPulse 0.7s ease-out forwards',
+                }}
+              />
+            )}
+          </button>
           <div
             style={{
               position: 'absolute',
@@ -140,6 +195,32 @@ export function Moment() {
               {hint}
             </div>
           </div>
+
+          {/* The provisional variation's pre-generated audition track plays
+              underneath while the user taps. Per memo §Phase 4: the system is
+              "auditioning a track with the participant" — operational
+              transparency via real audio. */}
+          <AmbientTrack
+            src={`/audio/audition/${provisionalVariation.id}.mp3`}
+            volume={0.5}
+            fadeInMs={1200}
+            loop
+          />
+
+          {/* Voice intro at the start; falls silent once tapping begins. */}
+          <AdmirerLine
+            text="this one's been waiting for you. tap with it."
+            register="caretaking"
+            delayMs={700}
+            enabled={tapTimes.length === 0}
+          />
+          {tapTimes.length >= 4 && (
+            <AdmirerLine
+              text="how does this sit with you?"
+              register="present"
+              delayMs={400}
+            />
+          )}
 
           <div
             className={`liking-row${tapTimes.length >= 4 ? '' : ''}`}

@@ -3,13 +3,14 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '@/lib/store';
 
-const ROMAN = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x'];
+const ROMAN = ['i', 'ii', 'iii', 'iv', 'v', 'vi', 'vii', 'viii', 'ix', 'x', 'xi'];
 const PHASE_NAMES = [
   'threshold',
   'spectrum',
   'emotion',
   'carry',
   'moment',
+  'reflection',
   'mirror',
   'composing',
   'recognition',
@@ -19,7 +20,7 @@ const PHASE_NAMES = [
 
 const TARGET_SECONDS = 300;
 /** Phase index from which onward the rite is unidirectional & timer-less. */
-export const POST_RITE_PHASE = 6;
+export const POST_RITE_PHASE = 7;
 
 export function TopBar() {
   const phase = useStore((s) => s.phase);

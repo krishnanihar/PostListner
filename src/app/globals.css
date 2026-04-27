@@ -358,6 +358,12 @@ body[data-paper="dark"]::after {
   to { opacity: 1; }
 }
 
+/* — Moment tap-pulse: radial flash from tap point (ported from v2) — */
+@keyframes tapPulse {
+  0%   { opacity: 0.85; transform: scale(1); }
+  100% { opacity: 0;    transform: scale(9); }
+}
+
 /* — common HTML overlays for phases — */
 .overlay {
   position: absolute;

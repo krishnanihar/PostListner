@@ -11,6 +11,8 @@ export interface AppState {
   currentPair: number;
   pairChoices: (Side | undefined)[];
   pairLatencies: (number | undefined)[];
+  /** Side the user hovered but did NOT commit — Stillman 2018 conflict marker. */
+  pairAlmosts: (Side | undefined)[];
 
   // phase 2
   currentExcerpt: number;
@@ -18,6 +20,8 @@ export interface AppState {
 
   // phase 3
   songs: [string, string, string];
+  /** Release years parallel to `songs`, populated by autocomplete pick. */
+  songYears: (number | null)[];
   songIndex: number;
 
   // phase 4
@@ -28,11 +32,15 @@ export interface AppState {
   // actions
   setPhase: (phase: number) => void;
   recordPairChoice: (index: number, side: Side, latency: number) => void;
+  recordPairAlmost: (index: number, side: Side) => void;
   nextPair: () => void;
   toggleEmotionTile: (excerptIndex: number, tile: string) => void;
   nextExcerpt: () => void;
-  setSong: (index: number, value: string) => void;
+  setSong: (index: number, value: string, year?: number | null) => void;
   nextSong: () => void;
+  /** Phase 0: first-name address used by Threshold + Mirror. */
+  userName: string;
+  setUserName: (name: string) => void;
   pushTap: (time: number) => void;
   setBPM: (bpm: number) => void;
   setLiking: (value: number) => void;
@@ -46,13 +54,16 @@ const initialState = {
   currentPair: 0,
   pairChoices: Array(PAIRS.length).fill(undefined) as (Side | undefined)[],
   pairLatencies: Array(PAIRS.length).fill(undefined) as (number | undefined)[],
+  pairAlmosts: Array(PAIRS.length).fill(undefined) as (Side | undefined)[],
   currentExcerpt: 0,
   emotionTiles: EXCERPTS.map(() => [] as string[]),
   songs: ['', '', ''] as [string, string, string],
+  songYears: [null, null, null] as (number | null)[],
   songIndex: 0,
   tapTimes: [] as number[],
   tapBPM: null,
   likingValue: null,
+  userName: '',
 };
 
 export const useStore = create<AppState>((set) => ({
@@ -67,6 +78,13 @@ export const useStore = create<AppState>((set) => ({
       pairChoices[index] = side;
       pairLatencies[index] = latency;
       return { pairChoices, pairLatencies };
+    }),
+
+  recordPairAlmost: (index, side) =>
+    set((s) => {
+      const pairAlmosts = [...s.pairAlmosts];
+      pairAlmosts[index] = side;
+      return { pairAlmosts };
     }),
 
   nextPair: () =>
@@ -95,12 +113,16 @@ export const useStore = create<AppState>((set) => ({
       return { phase: 3 };
     }),
 
-  setSong: (index, value) =>
+  setSong: (index, value, year = null) =>
     set((s) => {
       const songs = [...s.songs] as [string, string, string];
+      const songYears = [...s.songYears];
       songs[index] = value;
-      return { songs };
+      songYears[index] = year ?? null;
+      return { songs, songYears };
     }),
+
+  setUserName: (name) => set({ userName: name }),
 
   nextSong: () =>
     set((s) => {
@@ -127,9 +149,12 @@ export const useStore = create<AppState>((set) => ({
       ...initialState,
       pairChoices: Array(PAIRS.length).fill(undefined),
       pairLatencies: Array(PAIRS.length).fill(undefined),
+      pairAlmosts: Array(PAIRS.length).fill(undefined),
       emotionTiles: EXCERPTS.map(() => []),
       songs: ['', '', ''],
+      songYears: [null, null, null],
       tapTimes: [],
       startTime: Date.now(),
+      userName: '',
     })),
 }));

@@ -110,7 +110,27 @@ export const NOTES: PhaseNote[] = [
   },
   {
     phase: 5,
-    eyebrow: 'PHASE 5 · 4:35–5:00',
+    eyebrow: 'PHASE 5 · 4:35–4:55',
+    title: 'Reflection',
+    sections: [
+      { h: 'Function', p: 'The bridge from input to output. Per the stealable-techniques memo: "PostListener\'s single most important design element — it is where the \'being seen\' feeling is manufactured." Replika, ChatGPT, Midjourney, and Stanford\'s Riff chatbot all do it. Without this, the user\'s 5 minutes of choices vanish into a black box.' },
+      { h: 'Mechanic', p: 'Five sequential italic lines, fading in over ~9s. Each names back one signal: AVD lean from Phase 1, emotion vocabulary from Phase 2, one specific song from Phase 3, an era summary if the years cluster, tempo class from Phase 4. Final amber line ("now let me say what I see") hands off to Mirror.' },
+      { h: 'Extracts', p: 'Nothing — this is pure feedback. The reading is computed from prior-phase state.' },
+      { h: 'Why before Mirror, not after', p: 'Felt-personalisation depends on the user perceiving that the system saw them. The Mirror\'s Forer payoff is amplified when the user has just watched their inputs being narrated. Naming back is the legitimacy laundering for the identity claim that follows.' },
+      { h: 'Why one song from Phase 3 and not all three', p: 'Specificity > comprehensiveness. Citing one song with date is the Replika memory-callback move; listing all three reads as a confirmation of data, not a recognition of person.' },
+      { h: 'Why Reflection cites the first song, Mirror cites a different one', p: 'Two memory callbacks at different beats, hitting different identity registers (formative period vs taste autonomy per Rathbone). Avoids repetition; doubles the felt-presence.' },
+    ],
+    refs: [
+      'Stealable techniques memo §Replika, §Reflection screen.',
+      'Tam & Ho (2006). MIS Quarterly 30:865.',
+      'Li (2016). Computers in Human Behavior 54:25.',
+      'Pataranutaporn et al. (2023). Nature Machine Intelligence 5:1076.',
+    ],
+  },
+
+  {
+    phase: 6,
+    eyebrow: 'PHASE 6 · 4:55–5:00',
     title: 'The Mirror',
     sections: [
       { h: 'Function', p: 'The aggregation turn that completes separation and hands the listener into the liminal phase. This is where felt personalization is born — the highest-leverage moment in the entire flow.' },
@@ -133,8 +153,8 @@ export const NOTES: PhaseNote[] = [
   },
 
   {
-    phase: 6,
-    eyebrow: 'PHASE 6 · ~3:30',
+    phase: 7,
+    eyebrow: 'PHASE 7 · ~3:30',
     title: 'Composing — the Wait',
     sections: [
       { h: 'Function', p: 'The 2–4 minute generation window is not a loading screen — it is the opening movement. Loewenstein (1987) anticipatory utility shifts the dopamine signal from the reward to the cues; designed properly, this window is neurochemically half the reward.' },
@@ -154,8 +174,8 @@ export const NOTES: PhaseNote[] = [
   },
 
   {
-    phase: 7,
-    eyebrow: 'PHASE 7 · 0:30–1:30',
+    phase: 8,
+    eyebrow: 'PHASE 8 · 0:30–1:30',
     title: 'Recognition — the Reveal',
     sections: [
       { h: 'Function', p: 'Aristotelian anagnorisis. The listener crosses from "I am being analysed" to "I am being addressed." This is the peak in the peak-end rule — the most emotionally-loaded moment of the entire arc.' },
@@ -175,8 +195,8 @@ export const NOTES: PhaseNote[] = [
   },
 
   {
-    phase: 8,
-    eyebrow: 'PHASE 8 · 8:00 (placeholder)',
+    phase: 9,
+    eyebrow: 'PHASE 9 · 8:00 (placeholder)',
     title: 'Orchestra — Conducting & Dissolution',
     sections: [
       { h: 'Status', p: 'Placeholder. The full Conducting + Dissolution + Return arc lives here once gesture sensing, 4-stem separation, HRTF panning, and real-time DSP are wired in.' },
@@ -196,8 +216,8 @@ export const NOTES: PhaseNote[] = [
   },
 
   {
-    phase: 9,
-    eyebrow: 'PHASE 9 · ~0:30',
+    phase: 10,
+    eyebrow: 'PHASE 10 · ~0:30',
     title: 'Silence — the Threshold',
     sections: [
       { h: 'Function', p: 'The end of the rite. Inverse separation. The Admirer has withdrawn by design; what remains is the room, the listener, and 30 seconds of held space. This is the second peak in peak-end rule — the ending dominates retrospective evaluation.' },

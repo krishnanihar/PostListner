@@ -1,4 +1,4 @@
-import type { AVD, ScoredArchetype, Side } from '@/types';
+import type { AVD, ScoredArchetype, ScoredVariation, Side, Variation } from '@/types';
 import { ARCHETYPES } from '@/data/archetypes';
 import { PAIRS } from '@/data/pairs';
 
@@ -70,19 +70,17 @@ export function scoreArchetypes(
   emotionTiles: string[][]
 ): ScoredArchetype[] {
   const { vector, weight } = computeAVD(pairChoices, pairLatencies);
-  // emotion intersection
   const allTiles = emotionTiles.flat();
   const emoCount = allTiles.length || 1;
 
   const scored = ARCHETYPES.map<ScoredArchetype>((arc) => {
     const distance = avdDistance(vector, arc.avd);
-    // Convert to similarity 0..1 (higher = closer)
     const avdSim = 1 - Math.min(distance / MAX_DISTANCE, 1);
 
     const emoHits = allTiles.filter((t) => arc.emotions.includes(t)).length;
     const emoFrac = emoHits / emoCount;
 
-    // Weight AVD only when we have meaningful commits, otherwise lean on emotion
+    // Lean on emotion-tile signal until pair commits exist (per memo §1A).
     const avdWeight = weight === 0 ? 0 : 0.7;
     const total = avdWeight * avdSim + (1 - avdWeight) * emoFrac;
 
@@ -91,6 +89,89 @@ export function scoreArchetypes(
 
   scored.sort((a, b) => b.score - a.score);
   return scored;
+}
+
+export interface VariationContext {
+  /** Phase 3 song release years, if resolved. Used for era matching. */
+  songYears: number[];
+  /** Phase 4 tap BPM, if resolved. Maps to within-archetype intensity. */
+  tapBPM: number | null;
+  /** Flat list of all emotion tiles selected across Phase 2 excerpts. */
+  emotionTiles: string[];
+  /** AVD vector recovered from Phase 1 pair commits. */
+  avd: AVD;
+  /** Optional ε for stochasticity. Memo §1F: 0.10–0.15. */
+  epsilon?: number;
+}
+
+/** Bucket a numeric year into the era enum used by Variation.era. */
+export function yearToEra(year: number): Variation['era'] | null {
+  if (year < 1970) return null;
+  if (year < 1980) return '1970s';
+  if (year < 1990) return '1980s';
+  if (year < 2000) return '1990s';
+  if (year < 2010) return '2000s';
+  if (year < 2020) return '2010s';
+  return '2020s';
+}
+
+/**
+ * Within-archetype variation pick (Burke 2002 cascade hybrid step 2).
+ * Combines Phase 1 AVD refinement, Phase 2 secondary-emotion overlap,
+ * Phase 3 era signal, and Phase 4 tempo. ε-greedy injection at this
+ * level only — wrong archetypes break the contract, wrong variations
+ * produce surprise-hit effects (Anderson et al. 2020; Zhang et al. 2012).
+ */
+export function pickVariation(
+  archetype: ScoredArchetype,
+  ctx: VariationContext
+): ScoredVariation {
+  const epsilon = ctx.epsilon ?? 0.12;
+
+  // Era preference vector from Phase 3 named songs.
+  const eraVotes: Partial<Record<Variation['era'], number>> = {};
+  ctx.songYears.forEach((y) => {
+    const era = yearToEra(y);
+    if (era) eraVotes[era] = (eraVotes[era] ?? 0) + 1;
+  });
+  const eraVoteTotal = Object.values(eraVotes).reduce<number>((s, n) => s + (n ?? 0), 0);
+
+  // Map BPM into a target intensity (arousal) refinement, only when present.
+  const bpmTargetA =
+    ctx.tapBPM == null ? null : Math.max(0, Math.min(1, (ctx.tapBPM - 50) / 120));
+
+  const ranked = archetype.variations.map<ScoredVariation>((v) => {
+    // 1. AVD refinement: distance from Phase 1 vector to variation centre.
+    const avdDist = avdDistance(ctx.avd, v.avd);
+    const avdSim = 1 - Math.min(avdDist / MAX_DISTANCE, 1);
+
+    // 2. Era match: fraction of named songs that vote this era.
+    const eraSim = eraVoteTotal > 0 ? (eraVotes[v.era] ?? 0) / eraVoteTotal : 0.5;
+
+    // 3. Emotion overlap on variation tags (refines archetype-level emotion).
+    const emoHits = ctx.emotionTiles.filter((t) => v.emotions.includes(t)).length;
+    const emoSim = ctx.emotionTiles.length > 0 ? emoHits / ctx.emotionTiles.length : 0;
+
+    // 4. Tempo match: closeness of variation arousal to BPM-derived target.
+    const tempoSim = bpmTargetA == null ? 0.5 : 1 - Math.abs(bpmTargetA - v.avd[0]);
+
+    // Weighted blend — AVD dominates, era is the crucial Phase 3 signal,
+    // emotion + tempo are tie-breakers.
+    const base =
+      0.40 * avdSim +
+      0.25 * eraSim +
+      0.20 * emoSim +
+      0.15 * tempoSim;
+
+    // ε-greedy: per-variation uniform noise, scaled so argmax can flip
+    // without becoming unrecognisable as a recommendation.
+    const noise = (Math.random() * 2 - 1) * epsilon;
+    const distance = avdDist;
+    return { ...v, distance, score: base + noise };
+  });
+
+  ranked.sort((a, b) => b.score - a.score);
+  return ranked[0];
 }
 
 export function getTimeOfDayLine(date: Date = new Date()): string {
@@ -102,4 +183,19 @@ export function getTimeOfDayLine(date: Date = new Date()): string {
   if (hour >= 14 && hour < 18) return "Afternoon — the patient hour. You're not in a hurry.";
   if (hour >= 18 && hour < 21) return 'You found the gap between things. Good.';
   return "It's late, but not too late. The good listening hour.";
+}
+
+/**
+ * Phase 5 latency-conditional Forer line (memo §passive sensing).
+ * Median pair-commit RT > 3.5s reads as deliberation; < 1.5s reads as
+ * decisiveness. Real passive signal converted into Forer-compatible output.
+ */
+export function getLatencyLine(pairLatencies: (number | undefined)[]): string | null {
+  const rts = pairLatencies.filter((x): x is number => !!x);
+  if (rts.length < 3) return null;
+  const sorted = [...rts].sort((a, b) => a - b);
+  const median = sorted[Math.floor(sorted.length / 2)];
+  if (median > 3500) return 'You took your time. That is what I needed from you.';
+  if (median < 1500) return 'You knew what you wanted. That helped.';
+  return null;
 }

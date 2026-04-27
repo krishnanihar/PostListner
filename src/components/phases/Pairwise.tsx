@@ -1,162 +1,84 @@
 'use client';
 
-import { useEffect, useRef, useState, type PointerEvent as ReactPointerEvent } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Score, MARGIN_X, VB_W } from '@/score/Score';
 import { Linea } from '@/score/marks';
+import { PairWaveform } from '@/score/PairWaveform';
+import { PairAudio } from '@/components/PairAudio';
 import { COLORS, FONTS } from '@/score/tokens';
 import { PAIRS } from '@/data/pairs';
 import { useStore } from '@/lib/store';
-import type { Side } from '@/types';
+import { computeMidsetComment } from '@/lib/reflection';
+import type { Side, WaveShape } from '@/types';
 
 const STAVE_Y = 320;
 const STAVE_WIDTH = VB_W - MARGIN_X * 2;
 const MARK_SPACING = STAVE_WIDTH / PAIRS.length;
-const LEAN_THRESHOLD = 0.32;
-const COMMIT_DURATION = 2500; // ms held past threshold to commit
+/** Acknowledgement window after a commit before advancing. */
+const ACK_MS = 600;
 
 const AXIS_LABEL: Record<string, string> = {
-  arousal: 'arousal · pulse',
-  valence: 'valence · feeling',
-  depth: 'depth · interior',
+  warmth: 'warmth · the room',
+  density: 'density · the weight',
+  voice: 'voice · who speaks',
+  production: 'production · the surface',
+  mode: 'mode · the colour',
+  tempo: 'tempo · the patience',
+  rhythm: 'rhythm · the pull',
+  register: 'register · where it sits',
+  space: 'space · how far',
 };
 
 export function Pairwise() {
   const currentPair = useStore((s) => s.currentPair);
   const pairChoices = useStore((s) => s.pairChoices);
+  const pairLatencies = useStore((s) => s.pairLatencies);
   const recordPairChoice = useStore((s) => s.recordPairChoice);
+  const recordPairAlmost = useStore((s) => s.recordPairAlmost);
   const nextPair = useStore((s) => s.nextPair);
 
   const pair = PAIRS[currentPair];
   const chosen = pairChoices[currentPair];
 
+  const midsetComment = useMemo(
+    () => computeMidsetComment(pairChoices, pairLatencies, currentPair),
+    [pairChoices, pairLatencies, currentPair]
+  );
+
   const shownAt = useRef(0);
   const [transitioning, setTransitioning] = useState(false);
-  const [cursor, setCursor] = useState(0); // -1..1
-  const [holding, setHolding] = useState<{ side: Side; progress: number } | null>(null);
-  const holdRef = useRef<{ side: Side; startedAt: number } | null>(null);
-  const rafRef = useRef<number | null>(null);
-  const surfaceRef = useRef<HTMLDivElement>(null);
-  const pointerActive = useRef(false);
+  const [hover, setHover] = useState<Side | null>(null);
 
   useEffect(() => {
     shownAt.current = performance.now();
     setTransitioning(false);
-    setCursor(0);
-    setHolding(null);
-    holdRef.current = null;
+    setHover(null);
   }, [currentPair]);
 
   const commit = (side: Side) => {
     if (chosen || transitioning) return;
     const latency = performance.now() - shownAt.current;
+    // If the user hovered the other side just before committing, record it
+    // as a "considered but rejected" signal (Stillman 2018 conflict marker).
+    if (hover && hover !== side) {
+      recordPairAlmost(currentPair, hover);
+    }
     recordPairChoice(currentPair, side, latency);
     setTransitioning(true);
-    if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    setHolding(null);
-    setTimeout(() => nextPair(), 700);
+    setHover(null);
+    setTimeout(() => nextPair(), ACK_MS);
   };
 
-  // Continuous loop: while pointer is active, evaluate cursor + hold timing.
-  useEffect(() => {
-    let running = true;
-    const tick = () => {
-      if (!running) return;
-      const hold = holdRef.current;
-      if (hold) {
-        const elapsed = performance.now() - hold.startedAt;
-        const progress = Math.min(1, elapsed / COMMIT_DURATION);
-        setHolding({ side: hold.side, progress });
-        if (progress >= 1) {
-          commit(hold.side);
-          holdRef.current = null;
-          return;
-        }
-      }
-      rafRef.current = requestAnimationFrame(tick);
-    };
-    rafRef.current = requestAnimationFrame(tick);
-    return () => {
-      running = false;
-      if (rafRef.current) cancelAnimationFrame(rafRef.current);
-    };
-  }, [currentPair, transitioning]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  const updateFromPointer = (clientX: number) => {
-    const surface = surfaceRef.current;
-    if (!surface) return;
-    const rect = surface.getBoundingClientRect();
-    const norm = (clientX - rect.left) / rect.width; // 0..1
-    const pos = (norm - 0.5) * 2; // -1..1
-    setCursor(pos);
-
-    if (Math.abs(pos) > LEAN_THRESHOLD) {
-      const side: Side = pos < 0 ? 'a' : 'b';
-      if (!holdRef.current || holdRef.current.side !== side) {
-        holdRef.current = { side, startedAt: performance.now() };
-      }
-    } else if (holdRef.current) {
-      holdRef.current = null;
-      setHolding(null);
-    }
-  };
-
-  const onPointerDown = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (chosen || transitioning) return;
-    pointerActive.current = true;
-    e.currentTarget.setPointerCapture(e.pointerId);
-    updateFromPointer(e.clientX);
-  };
-  const onPointerMove = (e: ReactPointerEvent<HTMLDivElement>) => {
-    if (chosen || transitioning) return;
-    // Allow hover-driven movement on desktop without requiring pointerdown.
-    if (e.pointerType === 'mouse' || pointerActive.current) {
-      updateFromPointer(e.clientX);
-    }
-  };
-  const onPointerUp = (e: ReactPointerEvent<HTMLDivElement>) => {
-    pointerActive.current = false;
-    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch {}
-    // Soft tap: if cursor is past threshold, allow immediate commit.
-    if (!chosen && !transitioning && Math.abs(cursor) > LEAN_THRESHOLD + 0.15) {
-      commit(cursor < 0 ? 'a' : 'b');
-    } else {
-      holdRef.current = null;
-      setHolding(null);
-    }
-  };
-  const onPointerLeave = () => {
-    pointerActive.current = false;
-    holdRef.current = null;
-    setHolding(null);
-  };
-
-  const cursorSvgX = MARGIN_X + STAVE_WIDTH / 2 + cursor * (STAVE_WIDTH / 2);
-
-  // Marks for previously committed pairs
   const committedMarks = pairChoices
     .map((side, i) =>
       side ? { i, dip: side === 'a' ? ('left' as const) : ('right' as const) } : null
     )
     .filter((m): m is { i: number; dip: 'left' | 'right' } => !!m);
 
-  const cueText = transitioning
-    ? undefined
-    : holding
-    ? 'hold'
-    : Math.abs(cursor) > LEAN_THRESHOLD
-    ? 'hold'
-    : 'lean toward a word';
+  const cueText = transitioning ? undefined : 'choose the one you would keep';
 
   return (
-    <div
-      ref={surfaceRef}
-      onPointerDown={onPointerDown}
-      onPointerMove={onPointerMove}
-      onPointerUp={onPointerUp}
-      onPointerCancel={onPointerLeave}
-      onPointerLeave={onPointerLeave}
-      style={{ position: 'absolute', inset: 0, touchAction: 'none', cursor: 'pointer' }}
-    >
+    <div style={{ position: 'absolute', inset: 0 }}>
       <Score
         variant="cream"
         pageTitle="ii. spectrum"
@@ -166,21 +88,58 @@ export function Pairwise() {
         staves={[{ y: STAVE_Y }]}
         overlay={
           <>
+            {/* Pair audio — auto-plays clip A, switches on hover, holds the
+                chosen clip through the commit-acknowledgement window. */}
+            <PairAudio
+              axis={pair.axis}
+              hoverSide={hover}
+              chosenSide={chosen ?? null}
+              resetKey={currentPair}
+            />
+
+            {midsetComment && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '12%',
+                  left: 32,
+                  right: 32,
+                  textAlign: 'center',
+                  fontFamily: FONTS.serif,
+                  fontStyle: 'italic',
+                  fontSize: 13,
+                  color: COLORS.scoreAmber,
+                  opacity: 0.92,
+                  letterSpacing: '0.01em',
+                  animation: 'sceneFade 1.6s ease-out',
+                }}
+              >
+                {midsetComment}
+              </div>
+            )}
             <WordBlock
               side="left"
               label={pair.a.label}
               desc={pair.a.desc}
-              active={cursor < -0.2}
+              shape={pair.a.shape}
+              hover={hover === 'a'}
               committed={chosen === 'a'}
-              holdProgress={holding?.side === 'a' ? holding.progress : 0}
+              dim={!!chosen && chosen !== 'a'}
+              onEnter={() => !chosen && !transitioning && setHover('a')}
+              onLeave={() => hover === 'a' && setHover(null)}
+              onCommit={() => commit('a')}
             />
             <WordBlock
               side="right"
               label={pair.b.label}
               desc={pair.b.desc}
-              active={cursor > 0.2}
+              shape={pair.b.shape}
+              hover={hover === 'b'}
               committed={chosen === 'b'}
-              holdProgress={holding?.side === 'b' ? holding.progress : 0}
+              dim={!!chosen && chosen !== 'b'}
+              onEnter={() => !chosen && !transitioning && setHover('b')}
+              onLeave={() => hover === 'b' && setHover(null)}
+              onCommit={() => commit('b')}
             />
           </>
         }
@@ -193,9 +152,6 @@ export function Pairwise() {
             </g>
           );
         })}
-        {!chosen && !transitioning && (
-          <circle cx={cursorSvgX} cy={STAVE_Y + 6} r="3" fill={COLORS.scoreAmber} />
-        )}
       </Score>
     </div>
   );
@@ -205,20 +161,41 @@ interface WordBlockProps {
   side: 'left' | 'right';
   label: string;
   desc: string;
-  active: boolean;
+  shape: WaveShape;
+  hover: boolean;
   committed: boolean;
-  holdProgress: number;
+  dim: boolean;
+  onEnter: () => void;
+  onLeave: () => void;
+  onCommit: () => void;
 }
 
-function WordBlock({ side, label, desc, active, committed, holdProgress }: WordBlockProps) {
-  const color = committed ? COLORS.scoreAmber : active ? COLORS.inkCream : COLORS.inkCreamSecondary;
+function WordBlock({ side, label, desc, shape, hover, committed, dim, onEnter, onLeave, onCommit }: WordBlockProps) {
+  const color = committed
+    ? COLORS.scoreAmber
+    : dim
+    ? COLORS.inkCreamSecondary
+    : hover
+    ? COLORS.inkCream
+    : COLORS.inkCreamSecondary;
+
+  const wfState: 'idle' | 'hover' | 'committed' | 'dim' =
+    committed ? 'committed' : dim ? 'dim' : hover ? 'hover' : 'idle';
+
   return (
-    <div
+    <button
+      type="button"
+      onPointerEnter={onEnter}
+      onPointerLeave={onLeave}
+      onClick={onCommit}
       style={{
         position: 'absolute',
-        top: '36%',
-        [side]: '8%',
-        width: '40%',
+        top: '24%',
+        [side]: '6%',
+        width: '42%',
+        background: 'transparent',
+        border: 'none',
+        padding: '12px 8px',
         textAlign: side === 'left' ? 'left' : 'right',
         fontFamily: FONTS.serif,
         fontStyle: 'italic',
@@ -228,25 +205,15 @@ function WordBlock({ side, label, desc, active, committed, holdProgress }: WordB
         display: 'flex',
         flexDirection: 'column',
         alignItems: side === 'left' ? 'flex-start' : 'flex-end',
-        gap: 8,
-        pointerEvents: 'none',
-        transition: 'color 0.3s',
+        gap: 10,
+        cursor: committed || dim ? 'default' : 'pointer',
+        transition: 'color 0.25s, opacity 0.25s',
+        opacity: dim ? 0.55 : 1,
       }}
     >
-      {holdProgress > 0 && (
-        <div
-          style={{
-            height: 1.5,
-            background: COLORS.scoreAmber,
-            opacity: 0.25 + holdProgress * 0.55,
-            width: `${holdProgress * 100}%`,
-            [side === 'right' ? 'marginLeft' : 'marginRight']: 'auto',
-            transition: 'width 0.08s linear',
-          }}
-        />
-      )}
       <div>{label.toLowerCase()}</div>
+      <PairWaveform shape={shape} state={wfState} align={side} height={42} bars={28} />
       <div style={{ fontSize: 13, color: COLORS.inkCreamSecondary, lineHeight: 1.3 }}>{desc}</div>
-    </div>
+    </button>
   );
 }

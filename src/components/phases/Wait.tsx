@@ -26,7 +26,7 @@ export function Wait() {
       setElapsed(e);
       if (e >= TOTAL) {
         clearInterval(id);
-        setPhase(7);
+        setPhase(8);
       }
     }, 200);
     return () => clearInterval(id);

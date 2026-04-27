@@ -3,7 +3,7 @@
 import { useStore } from '@/lib/store';
 import { POST_RITE_PHASE } from './TopBar';
 
-const MAX_PHASE = 9;
+const MAX_PHASE = 10;
 
 export function Controls() {
   const phase = useStore((s) => s.phase);

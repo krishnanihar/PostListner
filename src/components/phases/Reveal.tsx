@@ -1,10 +1,29 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { Paper } from '@/score/Paper';
 import { COLORS, FONTS } from '@/score/tokens';
 import { useStore } from '@/lib/store';
-import { scoreArchetypes } from '@/lib/scoring';
+import { computeAVD, pickVariation, scoreArchetypes } from '@/lib/scoring';
+
+/**
+ * Format the temporal-uniqueness caption per stealable-techniques §10.
+ * "This piece was composed at [timestamp]. It has never existed before."
+ * — Mubert/generative-AI move; concrete time signatures make uniqueness real.
+ */
+function formatTimestamp(d: Date): string {
+  const time = d.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  });
+  const date = d.toLocaleDateString('en-US', {
+    month: 'long',
+    day: 'numeric',
+    year: 'numeric',
+  });
+  return `${time} on ${date}`;
+}
 
 /**
  * Recognition / Reveal — Aristotelian anagnorisis. 3–5s of full silence
@@ -26,14 +45,19 @@ export function Reveal() {
   const pairChoices = useStore((s) => s.pairChoices);
   const pairLatencies = useStore((s) => s.pairLatencies);
   const emotionTiles = useStore((s) => s.emotionTiles);
+  const songYears = useStore((s) => s.songYears);
+  const tapBPM = useStore((s) => s.tapBPM);
+  const userName = useStore((s) => s.userName);
   const setPhase = useStore((s) => s.setPhase);
+
+  const composedAt = useMemo(() => formatTimestamp(new Date()), []);
 
   const [now, setNow] = useState(0);
   useEffect(() => {
     const start = performance.now();
     const tick = () => setNow(performance.now() - start);
     const id = window.setInterval(tick, 80);
-    const advance = window.setTimeout(() => setPhase(8), T_NEXT);
+    const advance = window.setTimeout(() => setPhase(9), T_NEXT);
     return () => {
       clearInterval(id);
       clearTimeout(advance);
@@ -41,7 +65,16 @@ export function Reveal() {
   }, [setPhase]);
 
   const top = scoreArchetypes(pairChoices, pairLatencies, emotionTiles)[0];
-  const title = top?.variation ?? 'A piece for you';
+  const variation = top
+    ? pickVariation(top, {
+        avd: computeAVD(pairChoices, pairLatencies).vector,
+        songYears: songYears.filter((y): y is number => !!y),
+        tapBPM,
+        emotionTiles: emotionTiles.flat(),
+        epsilon: 0,
+      })
+    : null;
+  const title = variation?.tag ?? 'A piece for you';
 
   const showTitle = now >= T_TITLE;
   const drawLine = now >= T_UNDERLINE;
@@ -107,6 +140,32 @@ export function Reveal() {
           }}
         >
           I made this for you.
+        </p>
+
+        {/* Temporal uniqueness frame — Mubert / generative-AI idiom per
+            stealable-techniques §10. Concrete time signature makes the
+            uniqueness claim feel earned. */}
+        <p
+          style={{
+            position: 'absolute',
+            bottom: 36,
+            left: 32,
+            right: 32,
+            margin: 0,
+            textAlign: 'center',
+            fontFamily: FONTS.mono,
+            fontSize: 9,
+            letterSpacing: '0.18em',
+            color: COLORS.inkCreamSecondary,
+            opacity: showHandoff ? 0.65 : 0,
+            transition: 'opacity 1.8s 0.6s ease-out',
+            lineHeight: 1.7,
+          }}
+        >
+          composed at {composedAt}
+          {userName ? <> · for {userName.toLowerCase()}</> : null}
+          <br />
+          has never existed before
         </p>
       </div>
     </Paper>

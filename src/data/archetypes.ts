@@ -1,15 +1,19 @@
 import type { Archetype } from '@/types';
 
 /**
- * Six archetypes positioned in AVD space (a, v, d) — each occupies a distinct
- * region. Scoring computes distance from the user's accumulated AVD vector
- * to each archetype, plus emotion-tile intersection.
+ * Six archetypes × four variations = 24 cells, mirroring the Pandora-lite
+ * fixed catalog the memo prescribes. Archetypes occupy distinct regions in
+ * AVD space; variations refine that centre along (era × intensity ×
+ * production aesthetic). Selection is hierarchical: archetype is argmax,
+ * variation is cosine-near with ε-greedy serendipity.
+ *
+ * Production: brightness (spectral centroid proxy), density (sparse↔dense),
+ * warmth (analog/cold↔analog/warm). All 0..1.
  */
 export const ARCHETYPES: Archetype[] = [
   {
     id: 'mellow_contemplative',
     name: 'The Late-Night Architect',
-    variation: '2010s · Lo-fi piano',
     avd: [0.20, 0.45, 0.80],
     emotions: ['nostalgic', 'melancholic', 'peaceful', 'tender'],
     forer: [
@@ -17,13 +21,46 @@ export const ARCHETYPES: Archetype[] = [
       'You are drawn to the second half of songs more than the first.',
       "You resist anything that asks for your full attention before earning it, but you'll give an entire night to a song that does.",
       'You keep your saddest songs for cab rides home.',
-      'You are moved by what other people find too quiet.',
+      'You are moved by what other people find ___.',
+    ],
+    variations: [
+      {
+        id: 'late_night_2010s_lofi',
+        tag: '2010s · lo-fi piano for cab rides home',
+        era: '2010s',
+        avd: [0.18, 0.45, 0.78],
+        production: { brightness: 0.35, density: 0.28, warmth: 0.62 },
+        emotions: ['melancholic', 'peaceful'],
+      },
+      {
+        id: 'late_night_1980s_synth',
+        tag: '1980s · synth-melancholy at the kitchen counter',
+        era: '1980s',
+        avd: [0.28, 0.40, 0.82],
+        production: { brightness: 0.55, density: 0.38, warmth: 0.50 },
+        emotions: ['nostalgic', 'melancholic'],
+      },
+      {
+        id: 'late_night_2020s_neoclassical',
+        tag: '2020s · neo-classical for the hours after',
+        era: '2020s',
+        avd: [0.16, 0.50, 0.85],
+        production: { brightness: 0.42, density: 0.22, warmth: 0.55 },
+        emotions: ['tender', 'peaceful'],
+      },
+      {
+        id: 'late_night_1970s_ecm',
+        tag: '1970s · ECM piano for unfinished conversations',
+        era: '1970s',
+        avd: [0.22, 0.55, 0.80],
+        production: { brightness: 0.40, density: 0.32, warmth: 0.70 },
+        emotions: ['nostalgic', 'tender', 'peaceful'],
+      },
     ],
   },
   {
     id: 'sophisticated_melancholic',
     name: 'The Velvet Mystic',
-    variation: '1980s · Chamber dream-pop',
     avd: [0.30, 0.25, 0.85],
     emotions: ['awed', 'tender', 'melancholic', 'nostalgic'],
     forer: [
@@ -31,13 +68,46 @@ export const ARCHETYPES: Archetype[] = [
       "You are moved most by music that takes its time getting where it's going.",
       'There is one orchestral passage you have used as armour.',
       "You would rather a beautiful sad song than a clever happy one — and you don't apologise for it.",
-      'You collect chord changes the way other people collect photographs.',
+      'You collect chord changes the way other people collect ___.',
+    ],
+    variations: [
+      {
+        id: 'velvet_1980s_chamber',
+        tag: '1980s · chamber dream-pop for the long way home',
+        era: '1980s',
+        avd: [0.32, 0.28, 0.85],
+        production: { brightness: 0.50, density: 0.55, warmth: 0.60 },
+        emotions: ['tender', 'melancholic', 'nostalgic'],
+      },
+      {
+        id: 'velvet_1990s_orchestral',
+        tag: '1990s · orchestral indie for empty churches',
+        era: '1990s',
+        avd: [0.35, 0.25, 0.88],
+        production: { brightness: 0.45, density: 0.65, warmth: 0.55 },
+        emotions: ['awed', 'melancholic'],
+      },
+      {
+        id: 'velvet_2010s_strings',
+        tag: '2010s · chamber strings for the second listen',
+        era: '2010s',
+        avd: [0.28, 0.30, 0.82],
+        production: { brightness: 0.55, density: 0.50, warmth: 0.50 },
+        emotions: ['tender', 'awed'],
+      },
+      {
+        id: 'velvet_1970s_artrock',
+        tag: '1970s · art-rock baroque for high ceilings',
+        era: '1970s',
+        avd: [0.40, 0.22, 0.85],
+        production: { brightness: 0.42, density: 0.70, warmth: 0.65 },
+        emotions: ['melancholic', 'nostalgic', 'awed'],
+      },
     ],
   },
   {
     id: 'unpretentious_warm',
     name: 'The Hearth-Keeper',
-    variation: '1970s · Folk Americana',
     avd: [0.40, 0.75, 0.35],
     emotions: ['tender', 'peaceful', 'nostalgic'],
     forer: [
@@ -45,13 +115,46 @@ export const ARCHETYPES: Archetype[] = [
       "You've made playlists for people who never knew they were the subject.",
       "You're suspicious of anything too polished, but you forgive it if the voice is true.",
       "You've cried to a song someone else found cheesy and not been embarrassed.",
-      'You play certain songs only when the light is gold.',
+      'You play certain songs only when the light is ___.',
+    ],
+    variations: [
+      {
+        id: 'hearth_1970s_folk',
+        tag: '1970s · folk americana for the kitchen at dusk',
+        era: '1970s',
+        avd: [0.38, 0.78, 0.35],
+        production: { brightness: 0.50, density: 0.40, warmth: 0.85 },
+        emotions: ['tender', 'nostalgic', 'peaceful'],
+      },
+      {
+        id: 'hearth_1990s_alt_country',
+        tag: '1990s · alt-country for the long drive home',
+        era: '1990s',
+        avd: [0.45, 0.72, 0.38],
+        production: { brightness: 0.55, density: 0.50, warmth: 0.78 },
+        emotions: ['nostalgic', 'tender'],
+      },
+      {
+        id: 'hearth_2010s_indie_folk',
+        tag: '2010s · indie folk for the back porch',
+        era: '2010s',
+        avd: [0.42, 0.70, 0.40],
+        production: { brightness: 0.52, density: 0.42, warmth: 0.75 },
+        emotions: ['tender', 'peaceful'],
+      },
+      {
+        id: 'hearth_2020s_acoustic',
+        tag: '2020s · acoustic intimate for the slow morning',
+        era: '2020s',
+        avd: [0.36, 0.78, 0.42],
+        production: { brightness: 0.48, density: 0.32, warmth: 0.80 },
+        emotions: ['tender', 'peaceful', 'nostalgic'],
+      },
     ],
   },
   {
     id: 'contemporary_groove',
     name: 'The Slow Glow',
-    variation: '2020s · Downtempo soul',
     avd: [0.55, 0.70, 0.45],
     emotions: ['tender', 'peaceful', 'defiant'],
     forer: [
@@ -59,13 +162,46 @@ export const ARCHETYPES: Archetype[] = [
       "You're drawn to bass you can feel in the floor.",
       'You skip the verses on your favourite songs to get back to the part you actually want.',
       "A drum that swings will get you further with you than a drum that's perfect.",
-      'You play music the way other people pour wine — to set the room.',
+      'You play music the way other people ___ — to set the room.',
+    ],
+    variations: [
+      {
+        id: 'glow_2020s_downtempo',
+        tag: '2020s · downtempo soul for the room you set',
+        era: '2020s',
+        avd: [0.55, 0.72, 0.45],
+        production: { brightness: 0.55, density: 0.55, warmth: 0.65 },
+        emotions: ['tender', 'peaceful'],
+      },
+      {
+        id: 'glow_2010s_chillwave',
+        tag: '2010s · chillwave for nothing in particular',
+        era: '2010s',
+        avd: [0.50, 0.68, 0.48],
+        production: { brightness: 0.62, density: 0.50, warmth: 0.55 },
+        emotions: ['peaceful', 'nostalgic'],
+      },
+      {
+        id: 'glow_1990s_neo_soul',
+        tag: '1990s · neo-soul for the bath',
+        era: '1990s',
+        avd: [0.58, 0.74, 0.42],
+        production: { brightness: 0.50, density: 0.62, warmth: 0.78 },
+        emotions: ['tender', 'defiant'],
+      },
+      {
+        id: 'glow_1980s_quiet_storm',
+        tag: '1980s · quiet storm for after midnight',
+        era: '1980s',
+        avd: [0.52, 0.72, 0.50],
+        production: { brightness: 0.48, density: 0.55, warmth: 0.72 },
+        emotions: ['tender', 'peaceful'],
+      },
     ],
   },
   {
     id: 'intense_dark',
     name: 'The Quiet Insurgent',
-    variation: '2010s · Post-rock minor',
     avd: [0.85, 0.25, 0.55],
     emotions: ['defiant', 'melancholic', 'awed'],
     forer: [
@@ -73,13 +209,46 @@ export const ARCHETYPES: Archetype[] = [
       'A song without tension feels to you like a meal without salt.',
       "You've walked alone through a city at night with one specific song doing the heavy lifting.",
       "You distrust music that's trying to be liked.",
-      'Catharsis matters more to you than comfort.',
+      'Catharsis matters more to you than ___.',
+    ],
+    variations: [
+      {
+        id: 'insurgent_2010s_postrock',
+        tag: '2010s · post-rock for cities at 3am',
+        era: '2010s',
+        avd: [0.85, 0.25, 0.55],
+        production: { brightness: 0.50, density: 0.78, warmth: 0.40 },
+        emotions: ['defiant', 'awed'],
+      },
+      {
+        id: 'insurgent_1990s_grunge',
+        tag: '1990s · grunge restrained for the wrong end of a fight',
+        era: '1990s',
+        avd: [0.82, 0.22, 0.50],
+        production: { brightness: 0.55, density: 0.72, warmth: 0.45 },
+        emotions: ['defiant', 'melancholic'],
+      },
+      {
+        id: 'insurgent_1980s_postpunk',
+        tag: '1980s · post-punk for walking out',
+        era: '1980s',
+        avd: [0.80, 0.28, 0.58],
+        production: { brightness: 0.62, density: 0.65, warmth: 0.38 },
+        emotions: ['defiant', 'melancholic', 'awed'],
+      },
+      {
+        id: 'insurgent_2020s_dark_indie',
+        tag: '2020s · dark indie for the doubt',
+        era: '2020s',
+        avd: [0.78, 0.22, 0.62],
+        production: { brightness: 0.45, density: 0.68, warmth: 0.42 },
+        emotions: ['melancholic', 'defiant', 'awed'],
+      },
     ],
   },
   {
     id: 'euphoric_pop',
     name: 'The Sky-Seeker',
-    variation: '2020s · Cinematic awe',
     avd: [0.80, 0.85, 0.55],
     emotions: ['awed', 'defiant'],
     forer: [
@@ -87,7 +256,41 @@ export const ARCHETYPES: Archetype[] = [
       "You've been moved by a song you would never admit to in public.",
       'You will forgive a lot for a chord change that lifts.',
       'You like to be reminded that things can be big.',
-      'Hope embarrasses some people; you just let it in.',
+      'Hope embarrasses some people; you just ___.',
+    ],
+    variations: [
+      {
+        id: 'sky_2020s_cinematic',
+        tag: '2020s · cinematic awe for the highway at dusk',
+        era: '2020s',
+        avd: [0.78, 0.85, 0.58],
+        production: { brightness: 0.65, density: 0.72, warmth: 0.55 },
+        emotions: ['awed'],
+      },
+      {
+        id: 'sky_2010s_anthem',
+        tag: '2010s · anthem indie for the climb',
+        era: '2010s',
+        avd: [0.82, 0.82, 0.50],
+        production: { brightness: 0.70, density: 0.78, warmth: 0.50 },
+        emotions: ['awed', 'defiant'],
+      },
+      {
+        id: 'sky_2000s_orchestral_pop',
+        tag: '2000s · orchestral pop for the unembarrassed hope',
+        era: '2000s',
+        avd: [0.75, 0.85, 0.55],
+        production: { brightness: 0.62, density: 0.75, warmth: 0.58 },
+        emotions: ['awed'],
+      },
+      {
+        id: 'sky_1980s_widescreen',
+        tag: '1980s · widescreen pop for the wide-open part',
+        era: '1980s',
+        avd: [0.80, 0.88, 0.52],
+        production: { brightness: 0.72, density: 0.65, warmth: 0.48 },
+        emotions: ['awed', 'defiant'],
+      },
     ],
   },
 ];
