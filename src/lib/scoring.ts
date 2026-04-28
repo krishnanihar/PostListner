@@ -174,6 +174,32 @@ export function pickVariation(
   return ranked[0];
 }
 
+/**
+ * One-shot resolver: from raw store fields, return the top archetype + the
+ * picked variation in one call. Used by Wait / Reveal / Listening so the
+ * archetype × variation contract stays consistent across the post-rite arc.
+ * Pass `epsilon: 0` for deterministic resolution after Mirror has rendered.
+ */
+export function resolveSelection(args: {
+  pairChoices: (Side | undefined)[];
+  pairLatencies: (number | undefined)[];
+  emotionTiles: string[][];
+  songYears: (number | null)[];
+  tapBPM: number | null;
+  epsilon?: number;
+}): { archetype: ScoredArchetype; variation: ScoredVariation } | null {
+  const top = scoreArchetypes(args.pairChoices, args.pairLatencies, args.emotionTiles)[0];
+  if (!top) return null;
+  const variation = pickVariation(top, {
+    avd: computeAVD(args.pairChoices, args.pairLatencies).vector,
+    songYears: args.songYears.filter((y): y is number => !!y),
+    tapBPM: args.tapBPM,
+    emotionTiles: args.emotionTiles.flat(),
+    epsilon: args.epsilon ?? 0,
+  });
+  return { archetype: top, variation };
+}
+
 export function getTimeOfDayLine(date: Date = new Date()): string {
   const hour = date.getHours();
   if (hour >= 23 || hour < 5)  return 'You came to me at the loneliest hour. That always means something.';

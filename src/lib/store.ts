@@ -29,6 +29,14 @@ export interface AppState {
   tapBPM: number | null;
   likingValue: number | null;
 
+  // phase 7+ — per-session generated track
+  /** Object URL (live generation) or static path (offline/fallback). */
+  sessionTrackUrl: string | null;
+  /** Title shown at Reveal — variation tag for now, real model title later. */
+  sessionTrackTitle: string | null;
+  /** Generation pipeline state, surfaced by Wait/Reveal/Listening. */
+  sessionGenStatus: 'idle' | 'composing' | 'ready' | 'fallback' | 'error';
+
   // actions
   setPhase: (phase: number) => void;
   recordPairChoice: (index: number, side: Side, latency: number) => void;
@@ -45,6 +53,11 @@ export interface AppState {
   setBPM: (bpm: number) => void;
   setLiking: (value: number) => void;
   ensureStartTime: () => void;
+  setSessionTrack: (
+    url: string | null,
+    title: string | null,
+    status: AppState['sessionGenStatus']
+  ) => void;
   reset: () => void;
 }
 
@@ -64,6 +77,9 @@ const initialState = {
   tapBPM: null,
   likingValue: null,
   userName: '',
+  sessionTrackUrl: null as string | null,
+  sessionTrackTitle: null as string | null,
+  sessionGenStatus: 'idle' as AppState['sessionGenStatus'],
 };
 
 export const useStore = create<AppState>((set) => ({
@@ -144,6 +160,9 @@ export const useStore = create<AppState>((set) => ({
   ensureStartTime: () =>
     set((s) => (s.startTime ? {} : { startTime: Date.now() })),
 
+  setSessionTrack: (url, title, status) =>
+    set({ sessionTrackUrl: url, sessionTrackTitle: title, sessionGenStatus: status }),
+
   reset: () =>
     set(() => ({
       ...initialState,
@@ -156,5 +175,8 @@ export const useStore = create<AppState>((set) => ({
       tapTimes: [],
       startTime: Date.now(),
       userName: '',
+      sessionTrackUrl: null,
+      sessionTrackTitle: null,
+      sessionGenStatus: 'idle',
     })),
 }));

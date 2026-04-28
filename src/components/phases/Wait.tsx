@@ -1,10 +1,24 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Score, MARGIN_X, VB_W } from '@/score/Score';
 import { BreathPacer } from '@/score/BreathPacer';
 import { COLORS, FONTS } from '@/score/tokens';
 import { useStore } from '@/lib/store';
+import { resolveSelection } from '@/lib/scoring';
+import { auditionPrompt } from '@/lib/audioPrompts';
+import { isOfflineMode } from '@/lib/env';
+
+/**
+ * Phase 7 — Composing. Three-act ritual wait per Research/wait-as-ritual:
+ *   i. separation     · request kicked, narration slows
+ *   ii. liminality    · audio acquired, breath pacer holds presence
+ *   iii. incorporation· silence gap before the title appears in Reveal
+ *
+ * Drives the real generation pipeline (or the offline fallback to a
+ * pre-rendered audition track) and stores the resulting URL + title in
+ * the zustand store so Reveal and Listening can consume it.
+ */
 
 const ACTS = [
   { i: 'i.',   line: 'listening to your spectrum…' },
@@ -12,62 +26,189 @@ const ACTS = [
   { i: 'iii.', line: 'setting it down.' },
 ];
 
-const ACT_DURATIONS = [60_000, 90_000, 60_000]; // 1m + 1m30s + 1m  ≈ 3m30s total
-const TOTAL = ACT_DURATIONS.reduce((s, x) => s + x, 0);
+// Minimum time act i must hold even if generation returns instantly. The
+// ritual needs duration; without it the act flashes by. ~25s is short enough
+// that a slow generation finishes inside it most of the time.
+const ACT0_MIN_MS = 25_000;
+// Time act ii holds once the audio is acquired (buffer + presence).
+const ACT1_HOLD_MS = 14_000;
+// The honored silence between act iii and Reveal — Bregman gap before the
+// first heard note (Research/wait-as-ritual §incorporation).
+const ACT2_SILENCE_MS = 4_500;
+// Hard cap on a live generation request — abort and fall back if exceeded.
+const GEN_TIMEOUT_MS = 90_000;
 
 export function Wait() {
   const setPhase = useStore((s) => s.setPhase);
-  const [elapsed, setElapsed] = useState(0);
+  const setSessionTrack = useStore((s) => s.setSessionTrack);
+  const sessionGenStatus = useStore((s) => s.sessionGenStatus);
+  const pairChoices = useStore((s) => s.pairChoices);
+  const pairLatencies = useStore((s) => s.pairLatencies);
+  const emotionTiles = useStore((s) => s.emotionTiles);
+  const songYears = useStore((s) => s.songYears);
+  const tapBPM = useStore((s) => s.tapBPM);
 
+  const [elapsed, setElapsed] = useState(0);
+  const [audioReadyAt, setAudioReadyAt] = useState<number | null>(null);
+  const startRef = useRef<number>(0);
+
+  // Resolve the matched archetype + variation once, deterministically.
+  const selectionRef = useRef(
+    resolveSelection({
+      pairChoices,
+      pairLatencies,
+      emotionTiles,
+      songYears,
+      tapBPM,
+      epsilon: 0,
+    })
+  );
+
+  // Kick off generation on mount. Single effect, single fetch.
   useEffect(() => {
-    const start = performance.now();
-    const id = window.setInterval(() => {
-      const e = performance.now() - start;
-      setElapsed(e);
-      if (e >= TOTAL) {
-        clearInterval(id);
-        setPhase(8);
+    const sel = selectionRef.current;
+    if (!sel) {
+      // No commits at all — degenerate case. Skip ahead.
+      setSessionTrack(null, 'A piece for you', 'error');
+      setAudioReadyAt(performance.now());
+      return;
+    }
+
+    const title = sel.variation.tag;
+    setSessionTrack(null, title, 'composing');
+
+    // Fallback URL is the pre-rendered audition track for the picked
+    // variation — guaranteed to exist for all 24 variations.
+    const fallbackUrl = `/audio/audition/${sel.variation.id}.mp3`;
+
+    const useFallback = (status: 'fallback' | 'error') => {
+      setSessionTrack(fallbackUrl, title, status);
+      setAudioReadyAt(performance.now());
+    };
+
+    if (isOfflineMode()) {
+      // Skip the network round-trip entirely; fallback is silent and instant.
+      useFallback('fallback');
+      return;
+    }
+
+    const ctrl = new AbortController();
+    const timeout = window.setTimeout(() => ctrl.abort(), GEN_TIMEOUT_MS);
+
+    (async () => {
+      try {
+        const res = await fetch('/api/compose', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: auditionPrompt(sel.archetype, sel.variation),
+            lengthMs: 60_000,
+            bucket: 'session',
+            forceInstrumental: true,
+          }),
+          signal: ctrl.signal,
+        });
+        if (!res.ok) {
+          useFallback(res.status === 404 ? 'fallback' : 'error');
+          return;
+        }
+        const blob = await res.blob();
+        const url = URL.createObjectURL(blob);
+        setSessionTrack(url, title, 'ready');
+        setAudioReadyAt(performance.now());
+      } catch {
+        useFallback('error');
+      } finally {
+        window.clearTimeout(timeout);
       }
+    })();
+
+    return () => {
+      window.clearTimeout(timeout);
+      ctrl.abort();
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // Tick — drives both the visual progress and the act-transition logic.
+  useEffect(() => {
+    startRef.current = performance.now();
+    const id = window.setInterval(() => {
+      setElapsed(performance.now() - startRef.current);
     }, 200);
     return () => clearInterval(id);
-  }, [setPhase]);
+  }, []);
 
-  // Determine current act
-  let acc = 0;
+  // Determine act from elapsed + readiness. Act i holds until BOTH (audio
+  // acquired) AND (min hold elapsed). Act ii is a fixed-duration buffer.
+  // Act iii is a silence gap that ends in setPhase(8).
+  const act0Done =
+    audioReadyAt !== null &&
+    elapsed >= ACT0_MIN_MS;
+  const act1Start = audioReadyAt !== null ? Math.max(audioReadyAt - startRef.current, ACT0_MIN_MS) : null;
+  const act1Done = act1Start !== null && elapsed >= act1Start + ACT1_HOLD_MS;
+  const act2Start = act1Start !== null ? act1Start + ACT1_HOLD_MS : null;
+  const act2Done = act2Start !== null && elapsed >= act2Start + ACT2_SILENCE_MS;
+
   let actIdx = 0;
   let actProgress = 0;
-  for (let i = 0; i < ACT_DURATIONS.length; i++) {
-    if (elapsed < acc + ACT_DURATIONS[i]) {
-      actIdx = i;
-      actProgress = (elapsed - acc) / ACT_DURATIONS[i];
-      break;
-    }
-    acc += ACT_DURATIONS[i];
-    actIdx = i + 1;
+  if (!act0Done) {
+    actIdx = 0;
+    actProgress = Math.min(1, elapsed / ACT0_MIN_MS);
+  } else if (!act1Done && act1Start !== null) {
+    actIdx = 1;
+    actProgress = Math.min(1, (elapsed - act1Start) / ACT1_HOLD_MS);
+  } else if (!act2Done && act2Start !== null) {
+    actIdx = 2;
+    actProgress = Math.min(1, (elapsed - act2Start) / ACT2_SILENCE_MS);
+  } else {
+    actIdx = ACTS.length;
   }
-  if (actIdx >= ACTS.length) actIdx = ACTS.length - 1;
 
-  // Backward-ribbed progress: stave fills from right to left, perceptually
-  // accelerates near completion (Harrison et al. 2010).
-  const overall = Math.min(1, elapsed / TOTAL);
+  // Advance to Reveal once act iii completes.
+  useEffect(() => {
+    if (act2Done) setPhase(8);
+  }, [act2Done, setPhase]);
+
+  // Backward-filling progress stave covering the full ritual. Total horizon
+  // is approximate (we don't know gen latency in advance) — use ACT0_MIN +
+  // act1 + act2 as the nominal arc, capped at 1.
+  const nominalTotal = ACT0_MIN_MS + ACT1_HOLD_MS + ACT2_SILENCE_MS;
+  const overall = Math.min(1, elapsed / nominalTotal);
   const easedOverall = 1 - Math.pow(1 - overall, 1.4);
   const filledX = MARGIN_X + (VB_W - MARGIN_X * 2) * (1 - easedOverall);
   const PROGRESS_Y = 540;
+
+  // Status crumb in the footer area — informative without breaking the
+  // ritual frame. "live" when a real generation succeeded; "from the
+  // archive" when we used the pre-rendered audition.
+  const footerStatus =
+    sessionGenStatus === 'ready'
+      ? 'composing · live'
+      : sessionGenStatus === 'fallback'
+      ? 'composing · from the archive'
+      : sessionGenStatus === 'error'
+      ? 'composing · from the archive'
+      : 'composing · listening';
 
   return (
     <Score
       variant="cream"
       pageTitle="vii. composing"
       pageNumber="—"
-      voiceCue="breathe with the line. it is being made."
-      footer="generation · stage · ritual"
+      voiceCue={actIdx >= 2 ? '' : 'breathe with the line. it is being made.'}
+      footer={footerStatus}
     >
-      {/* Breath pacer at upper-third — the eye returns to this */}
-      <g transform={`translate(${VB_W / 2}, 200)`}>
+      {/* Breath pacer at upper-third. Fades out under act iii so the silence
+          feels intentional rather than mid-ritual. */}
+      <g
+        transform={`translate(${VB_W / 2}, 200)`}
+        opacity={actIdx >= 2 ? 0.15 : 1}
+        style={{ transition: 'opacity 1.4s ease-out' }}
+      >
         <BreathPacer bpm={5.5} size={80} color={COLORS.inkCream} opacity={0.85} />
       </g>
 
-      {/* Three acts, struck through as they complete */}
       {ACTS.map((act, i) => {
         const completed = i < actIdx;
         const active = i === actIdx;
@@ -103,7 +244,6 @@ export function Wait() {
         );
       })}
 
-      {/* Backward-filling progress stave — the visual time-compass */}
       <g>
         <line
           x1={MARGIN_X}
@@ -124,26 +264,8 @@ export function Wait() {
           strokeWidth="1"
           vectorEffect="non-scaling-stroke"
         />
-        {/* tick marks for each act boundary */}
-        {[ACT_DURATIONS[0], ACT_DURATIONS[0] + ACT_DURATIONS[1]].map((t, i) => {
-          const f = t / TOTAL;
-          const x = MARGIN_X + (VB_W - MARGIN_X * 2) * f;
-          return (
-            <line
-              key={i}
-              x1={x}
-              y1={PROGRESS_Y - 3}
-              x2={x}
-              y2={PROGRESS_Y + 3}
-              stroke={COLORS.inkCreamSecondary}
-              strokeWidth="0.6"
-              vectorEffect="non-scaling-stroke"
-            />
-          );
-        })}
       </g>
 
-      {/* Single act-progress dot under the active act */}
       {actIdx < ACTS.length && (
         <circle
           cx={MARGIN_X + (VB_W - MARGIN_X * 2) * actProgress}

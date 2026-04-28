@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Paper } from '@/score/Paper';
 import { COLORS, FONTS } from '@/score/tokens';
 import { useStore } from '@/lib/store';
-import { computeAVD, pickVariation, scoreArchetypes } from '@/lib/scoring';
+import { resolveSelection } from '@/lib/scoring';
 
 /**
  * Format the temporal-uniqueness caption per stealable-techniques §10.
@@ -30,9 +30,10 @@ function formatTimestamp(d: Date): string {
  * before the first note, then the generated title appears, then a single
  * ink line is drawn under it as the music is meant to begin.
  *
- * In this prototype the title is the matched archetype's variation tag
- * (e.g. "Lo-fi piano · 2010s"). Replace with the real generated title once
- * the ElevenLabs Music pipeline is wired in.
+ * Title source: prefers the session title that Wait stored after the
+ * generation pipeline resolved (live or fallback). Falls back to the
+ * matched variation tag if that store slot is empty (e.g. when Reveal is
+ * jumped to from the dev TopBar without going through Wait).
  */
 
 const T_SILENCE = 3500;
@@ -49,6 +50,7 @@ export function Reveal() {
   const tapBPM = useStore((s) => s.tapBPM);
   const userName = useStore((s) => s.userName);
   const setPhase = useStore((s) => s.setPhase);
+  const sessionTrackTitle = useStore((s) => s.sessionTrackTitle);
 
   const composedAt = useMemo(() => formatTimestamp(new Date()), []);
 
@@ -64,17 +66,15 @@ export function Reveal() {
     };
   }, [setPhase]);
 
-  const top = scoreArchetypes(pairChoices, pairLatencies, emotionTiles)[0];
-  const variation = top
-    ? pickVariation(top, {
-        avd: computeAVD(pairChoices, pairLatencies).vector,
-        songYears: songYears.filter((y): y is number => !!y),
-        tapBPM,
-        emotionTiles: emotionTiles.flat(),
-        epsilon: 0,
-      })
-    : null;
-  const title = variation?.tag ?? 'A piece for you';
+  const fallback = resolveSelection({
+    pairChoices,
+    pairLatencies,
+    emotionTiles,
+    songYears,
+    tapBPM,
+    epsilon: 0,
+  });
+  const title = sessionTrackTitle ?? fallback?.variation.tag ?? 'A piece for you';
 
   const showTitle = now >= T_TITLE;
   const drawLine = now >= T_UNDERLINE;

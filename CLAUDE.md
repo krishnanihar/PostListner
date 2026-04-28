@@ -21,9 +21,9 @@ arc into the Orchestra.
 | 4 | Moment | [Moment.tsx](src/components/phases/Moment.tsx) | Tap-rhythm BPM · 7-point Hurley liking · auditioning track |
 | 5 | **Reflection** | [Reflection.tsx](src/components/phases/Reflection.tsx) | Reads back user signals — the felt-personalization bridge |
 | 6 | Mirror | [Mirror.tsx](src/components/phases/Mirror.tsx) | Archetype reveal · Forer paragraphs · memory callback · pair residue |
-| 7 | Composing (Wait) | [Wait.tsx](src/components/phases/Wait.tsx) | Generation-window ritual — currently a fake timer |
-| 8 | Recognition (Reveal) | [Reveal.tsx](src/components/phases/Reveal.tsx) | Anagnorisis — silence then title |
-| 9 | Orchestra (Listening) | [Listening.tsx](src/components/phases/Listening.tsx) | Placeholder — gesture/HRTF/4-stem not wired |
+| 7 | Composing (Wait) | [Wait.tsx](src/components/phases/Wait.tsx) | Three-act state machine driving `/api/compose`; offline falls back to the audition file for the matched variation |
+| 8 | Recognition (Reveal) | [Reveal.tsx](src/components/phases/Reveal.tsx) | Anagnorisis — silence then title; reads `sessionTrackTitle` if Wait set it |
+| 9 | Orchestra (Listening) | [Listening.tsx](src/components/phases/Listening.tsx) | Web Audio HRTF + gesture + 6-section dissolution arc; single-source (4-stem separation pending) |
 | 10 | Silence | [Silence.tsx](src/components/phases/Silence.tsx) | Inverse separation — input goes nowhere by design |
 
 **Reflection (5) is inserted between Moment and Mirror** — when reading old
@@ -81,10 +81,83 @@ Three buckets, all under [public/audio/](public/audio/):
 Plus the **Phase 0 drone** ([Drone.tsx](src/components/Drone.tsx)) which is
 pure Web Audio, no file, no API.
 
-The **per-session generated track** for Phase 5 sub-audible fade-up + Phase 7
-Wait + Phase 8 Reveal is the only thing designed to be live per session
-(temporal-uniqueness claim). **Not yet built** — gated on the user reviewing
-voice tone first.
+The **per-session generated track** for Phase 7 Wait + Phase 8 Reveal +
+Phase 9 Listening is wired end-to-end:
+
+- [Wait.tsx](src/components/phases/Wait.tsx) calls `/api/compose` with the
+  prompt from [`auditionPrompt(archetype, variation)`](src/lib/audioPrompts.ts)
+  and stores the resulting blob URL on the zustand store as
+  `sessionTrackUrl` (with `sessionTrackTitle`, `sessionGenStatus`).
+- In offline mode (or on any non-200), Wait skips the network and points
+  `sessionTrackUrl` at `/audio/audition/{variation.id}.mp3` — guaranteed
+  on disk for all 24 variations. Status flips to `fallback` so the footer
+  reads "from the archive" instead of "live".
+- [Reveal.tsx](src/components/phases/Reveal.tsx) prefers
+  `sessionTrackTitle`, falls back to the picked variation tag.
+- [Listening.tsx](src/components/phases/Listening.tsx) plays
+  `sessionTrackUrl` through a Web Audio graph and revokes the blob URL
+  on unmount.
+
+**Still TODO on the music side**: a proper
+AVD-vector-to-`composition_plan` renderer (currently the same prompt
+shape as audition clips, just for `lengthMs: 60_000`), and the HTDemucs
+4-stem separation that would let Listening route real `vocals · drums ·
+bass · other` rather than spectral-bucket onsets on a single source.
+
+## Listening engine (Phase 9)
+
+[Listening.tsx](src/components/phases/Listening.tsx) hosts a
+`ListeningEngine` class that owns all Web Audio state — the React
+component is a thin lifecycle wrapper.
+
+Graph (top to bottom):
+
+```
+HTMLAudioElement (sessionTrackUrl, looping)
+  → MediaElementSource
+  → BiquadFilter (lowpass, gesture-controlled cutoff)
+  → split:  dry → dryGain
+            wet → ConvolverNode (synthesized 0.6s room IR) → wetGain
+  → PannerNode (panningModel='HRTF', distanceModel='inverse')
+  → masterGain
+  → AnalyserNode (taps off master for onset detection)
+  → ctx.destination
+```
+
+**Six-section dissolution arc** (3 min total prototype, not the full 6
+min from `Research/ego-dissolution-postlistener-architecture` —
+expand once the real composition is rendered):
+
+1. `threshold`  0–30s  — center, bright, low wet
+2. `release`    30–75s — pan drift widens, lowpass narrows, wet rises
+3. `peak`       75–120s — Bregman cue degradation: ±22c detune via `playbackRate`, wet 0.7, lowpass 1500Hz
+4. `return`     120–150s — params resolve back toward center
+5. `homecoming` 150–170s — clean and slightly slower
+6. `silence`    170–180s — masterGain ramps to 0, then `setPhase(10)`
+
+Cross-fades the last 1.5s of each section into the next so the seams
+are inaudible.
+
+**Gesture mapping** (`Research/gesture-felt-agency`): listens on
+`deviceorientation` + `devicemotion`. iOS 13+ requires permission, so
+the UI gates engine start behind a "BEGIN" button that calls
+`DeviceOrientationEvent.requestPermission()` AND resumes the
+AudioContext on the same gesture. Smoothing is a single-pole low-pass
+(α≈0.18) — adequate for prototype; full 1€ filter is the upgrade path.
+
+| Sensor | Mapping | Range |
+|---|---|---|
+| roll (γ) | `panner.positionX` | ±1.2 added to section drift |
+| pitch (β) | filter cutoff (logarithmic) | × 2^±1 octave |
+| `\|accel\|` | masterGain bump | +0.08 |
+
+**Pointer fallback** — when no device events fire (desktop), pointer
+x/y over the SVG drives roll + pitch directly.
+
+**Onset visual** — the AnalyserNode RMS-derivative emits onsets;
+spectral centroid buckets them into one of the four staves. NOT real
+4-stem separation; explicitly a visual proxy. Marks decay over ~6s so
+the page never crowds.
 
 ## ElevenLabs API gotchas
 
