@@ -85,6 +85,27 @@ const SECTIONS: Section[] = [
 ];
 const ARC_TOTAL_MS = SECTIONS[SECTIONS.length - 1].end;
 
+/**
+ * Gentle-path softening: when the listener flagged any screening question,
+ * soften only the peak section so the dissolution apex is less intense
+ * (less detune, less reverb, less timbral blur, less agency-break).
+ * Other sections stay identical.
+ */
+function softenSections(secs: Section[]): Section[] {
+  return secs.map((s) => {
+    if (s.key !== 'peak') return s;
+    return {
+      ...s,
+      detuneCents: s.detuneCents * 0.4,
+      wetMix: Math.min(0.45, s.wetMix),
+      timbralBlur: (s.timbralBlur ?? 0) * 0.5,
+      consistencyBroken: s.consistencyBroken * 0.5,
+      priorityDelayMs: s.priorityDelayMs * 0.5,
+      exclusivityBroken: s.exclusivityBroken * 0.6,
+    };
+  });
+}
+
 /** Linear interpolation, clamped to [0,1] on t. */
 const lerp = (a: number, b: number, t: number) => a + (b - a) * Math.max(0, Math.min(1, t));
 
@@ -111,6 +132,7 @@ async function buildRoomIR(ctx: AudioContext): Promise<AudioBuffer> {
 interface EngineOpts {
   url: string;
   stemUrls?: { vocals: string; drums: string; bass: string; other: string } | null;
+  gentlePath?: boolean;
   onArcEnd: () => void;
   onOnset: (stemIdx: number) => void;
 }
@@ -173,7 +195,13 @@ class ListeningEngine {
   // Bregman onset-synchrony: only re-seek per-stem currentTime at section transitions.
   private lastSectionIdx = -1;
 
-  constructor(private opts: EngineOpts) {}
+  // Per-instance section table — softened if gentlePath is on. ARC_TOTAL_MS still
+  // derives from the master SECTIONS constant (silence end is fixed regardless).
+  private sections: Section[];
+
+  constructor(private opts: EngineOpts) {
+    this.sections = opts.gentlePath ? softenSections(SECTIONS) : SECTIONS;
+  }
 
   async start() {
     if (this.running) return;
@@ -220,13 +248,13 @@ class ListeningEngine {
 
       const filter = ctx.createBiquadFilter();
       filter.type = 'lowpass';
-      filter.frequency.value = SECTIONS[0].filterHz;
+      filter.frequency.value = this.sections[0].filterHz;
       filter.Q.value = 0.7;
 
       const dryGain = ctx.createGain();
       const wetGain = ctx.createGain();
-      dryGain.gain.value = 1 - SECTIONS[0].wetMix;
-      wetGain.gain.value = SECTIONS[0].wetMix;
+      dryGain.gain.value = 1 - this.sections[0].wetMix;
+      wetGain.gain.value = this.sections[0].wetMix;
 
       const panner = ctx.createPanner();
       panner.panningModel = 'HRTF';
@@ -263,7 +291,7 @@ class ListeningEngine {
     masterGain.connect(ctx.destination);
 
     // Fade master in over 1.2s to the section baseline.
-    masterGain.gain.linearRampToValueAtTime(SECTIONS[0].masterGain, ctx.currentTime + 1.2);
+    masterGain.gain.linearRampToValueAtTime(this.sections[0].masterGain, ctx.currentTime + 1.2);
 
     // Sub-bass drone + theta binaural layers — connected into the master path
     // so they ride the section's masterGain envelope (fades in/out across the arc).
@@ -307,13 +335,13 @@ class ListeningEngine {
 
       const filter = ctx.createBiquadFilter();
       filter.type = 'lowpass';
-      filter.frequency.value = SECTIONS[0].filterHz;
+      filter.frequency.value = this.sections[0].filterHz;
       filter.Q.value = 0.7;
 
       const dryGain = ctx.createGain();
       const wetGain = ctx.createGain();
-      dryGain.gain.value = 1 - SECTIONS[0].wetMix;
-      wetGain.gain.value = SECTIONS[0].wetMix;
+      dryGain.gain.value = 1 - this.sections[0].wetMix;
+      wetGain.gain.value = this.sections[0].wetMix;
 
       const panner = ctx.createPanner();
       panner.panningModel = 'HRTF';
@@ -415,12 +443,12 @@ class ListeningEngine {
   /** Currently-active section index based on elapsed playback time. */
   private currentSection(elapsed: number): { idx: number; t: number; sec: Section; next: Section } {
     let idx = 0;
-    for (let i = 0; i < SECTIONS.length; i++) {
-      if (elapsed < SECTIONS[i].end) { idx = i; break; }
+    for (let i = 0; i < this.sections.length; i++) {
+      if (elapsed < this.sections[i].end) { idx = i; break; }
       idx = i;
     }
-    const sec = SECTIONS[idx];
-    const next = SECTIONS[Math.min(idx + 1, SECTIONS.length - 1)];
+    const sec = this.sections[idx];
+    const next = this.sections[Math.min(idx + 1, this.sections.length - 1)];
     const span = sec.end - sec.start;
     const t = span > 0 ? (elapsed - sec.start) / span : 1;
     return { idx, t, sec, next };
@@ -610,6 +638,7 @@ export function Listening() {
   const emotionTiles = useStore((s) => s.emotionTiles);
   const songYears = useStore((s) => s.songYears);
   const tapBPM = useStore((s) => s.tapBPM);
+  const gentlePath = useStore((s) => s.gentlePath);
 
   // Resolve playback URL: prefer the per-session track Wait stored,
   // otherwise fall back to the variation's audition file.
@@ -716,6 +745,7 @@ export function Listening() {
     const engine = new ListeningEngine({
       url: playUrl,
       stemUrls: sessionStemUrls,
+      gentlePath,
       onArcEnd: () => setPhase(10),
       onOnset: handleOnset,
     });
