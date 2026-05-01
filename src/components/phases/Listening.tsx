@@ -34,6 +34,7 @@ import { Downbeat } from '@/score/marks';
 import { COLORS, FONTS } from '@/score/tokens';
 import { useStore } from '@/lib/store';
 import { resolveSelection } from '@/lib/scoring';
+import { AdmirerLine } from '@/components/AdmirerLine';
 
 const STEM_NAMES = ['vocals', 'drums', 'bass', 'other'];
 const STEM_Y = [200, 290, 380, 470];
@@ -671,6 +672,22 @@ export function Listening() {
             </p>
           )}
         </div>
+      )}
+
+      {/*
+       * Admirer relational-withdrawal arc — voice timed to section starts.
+       * Caretaking stands in for the unwired "Fading/Return" register; the
+       * peak window (150_000–210_000) is deliberately silent so the Admirer
+       * dissolves with the listener rather than narrating over the apex.
+       */}
+      {started && (
+        <>
+          <AdmirerLine text="you have it. start moving." register="elevated"   delayMs={1500} />
+          <AdmirerLine text="let it widen."              register="caretaking" delayMs={62_000} />
+          {/* peak: deliberate silence — no AdmirerLine emitted between 150_000 and 210_000 */}
+          <AdmirerLine text="you're here."               register="caretaking" delayMs={212_000} />
+          <AdmirerLine text="we made this together."     register="elevated"   delayMs={272_000} />
+        </>
       )}
     </div>
   );
