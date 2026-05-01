@@ -5,8 +5,8 @@ import { Score, MARGIN_X, VB_W } from '@/score/Score';
 import { BreathPacer } from '@/score/BreathPacer';
 import { COLORS, FONTS } from '@/score/tokens';
 import { useStore } from '@/lib/store';
-import { resolveSelection } from '@/lib/scoring';
-import { auditionPrompt } from '@/lib/audioPrompts';
+import { resolveSelection, computeAVD } from '@/lib/scoring';
+import { buildCompositionPlan } from '@/lib/compositionPlan';
 import { isOfflineMode } from '@/lib/env';
 
 /**
@@ -36,7 +36,7 @@ const ACT1_HOLD_MS = 14_000;
 // first heard note (Research/wait-as-ritual §incorporation).
 const ACT2_SILENCE_MS = 4_500;
 // Hard cap on a live generation request — abort and fall back if exceeded.
-const GEN_TIMEOUT_MS = 90_000;
+const GEN_TIMEOUT_MS = 240_000; // 4 min ceiling for a 6-min composition_plan.
 
 export function Wait() {
   const setPhase = useStore((s) => s.setPhase);
@@ -97,14 +97,19 @@ export function Wait() {
 
     (async () => {
       try {
+        const avdVec = computeAVD(pairChoices, pairLatencies).vector;
+        const plan = buildCompositionPlan({
+          archetype: sel.archetype,
+          variation: sel.variation,
+          avd: [avdVec.a, avdVec.v, avdVec.d],
+        });
+
         const res = await fetch('/api/compose', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            prompt: auditionPrompt(sel.archetype, sel.variation),
-            lengthMs: 60_000,
+            compositionPlan: plan,
             bucket: 'session',
-            forceInstrumental: true,
           }),
           signal: ctrl.signal,
         });
