@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, type ReactNode } from 'react';
 import { Score, MARGIN_X, VB_W } from '@/score/Score';
 import { Fermata, Marcato, Tremolo, Linea } from '@/score/marks';
 import { COLORS, FONTS } from '@/score/tokens';
@@ -14,6 +14,43 @@ import {
 } from '@/lib/scoring';
 import { buildAttribution, pickMirrorSong } from '@/lib/reflection';
 import { AdmirerLine } from '@/components/AdmirerLine';
+
+/**
+ * Render a Forer line, replacing any `___` marker with a typographically
+ * distinct blank — a faded amber underscore the listener's eye reads as an
+ * invitation to fill, not as missing copy. DARKFIELD's "audience-sized
+ * holes" principle (Glen Neath, The Lowry 2024).
+ *
+ * Lines without `___` are returned as-is. Multiple markers are not
+ * supported (none of the archetypes ship with more than one).
+ */
+function renderForer(line: string): ReactNode {
+  const idx = line.indexOf('___');
+  if (idx < 0) return line;
+  const before = line.slice(0, idx);
+  const after = line.slice(idx + 3);
+  return (
+    <>
+      {before}
+      <span
+        aria-hidden
+        style={{
+          display: 'inline-block',
+          width: '5.5ch',
+          borderBottom: `0.5px solid ${COLORS.scoreAmber}`,
+          opacity: 0.55,
+          marginBottom: 4,
+          verticalAlign: 'baseline',
+        }}
+      />
+      {/* Screen-reader fallback so the gap is announced as a pause, not skipped. */}
+      <span style={{ position: 'absolute', width: 1, height: 1, overflow: 'hidden', clip: 'rect(0 0 0 0)' }}>
+        {' '}— a blank for you —{' '}
+      </span>
+      {after}
+    </>
+  );
+}
 
 export function Mirror() {
   const pairChoices = useStore((s) => s.pairChoices);
@@ -216,7 +253,7 @@ export function Mirror() {
                     transition: 'opacity 1.2s ease-out, transform 1.2s ease-out',
                   }}
                 >
-                  {line}
+                  {renderForer(line)}
                 </p>
               );
             })}
