@@ -165,6 +165,10 @@ class ListeningEngine {
     dryGain: GainNode;
     wetGain: GainNode;
     panner: PannerNode;
+    analyser: AnalyserNode;
+    prevRMS: number;
+    cooldown: number;
+    timeBuf: Uint8Array<ArrayBuffer>;
   }> = [];
   // Bregman onset-synchrony: only re-seek per-stem currentTime at section transitions.
   private lastSectionIdx = -1;
@@ -331,8 +335,21 @@ class ListeningEngine {
       wetGain.connect(panner);
       panner.connect(masterGain);
 
+      // Per-stem analyser tap pre-spatial — onsets reflect what was played, not where.
+      // Acts as a sink (no downstream connection required).
+      const analyser = ctx.createAnalyser();
+      analyser.fftSize = 1024;
+      analyser.smoothingTimeConstant = 0.4;
+      filter.connect(analyser);
+
       await audio.play().catch(() => {});
-      this.stemNodes.push({ audio, source, filter, dryGain, wetGain, panner });
+      this.stemNodes.push({
+        audio, source, filter, dryGain, wetGain, panner,
+        analyser,
+        prevRMS: 0,
+        cooldown: 0,
+        timeBuf: new Uint8Array(new ArrayBuffer(analyser.fftSize)),
+      });
     }
   }
 
@@ -558,6 +575,28 @@ class ListeningEngine {
         else if (fraction < 0.45) stemIdx = 0;  // vocals (mid)
         this.opts.onOnset(stemIdx);
       }
+    }
+
+    // Per-stem onset detection. When stems are loaded each stem owns its
+    // analyser; stem index maps directly to stave (vocals=0, drums=1, bass=2,
+    // other=3). No-op when stemNodes is empty (single-source path handled above).
+    if (this.stemNodes.length > 0) {
+      this.stemNodes.forEach((node, idx) => {
+        node.analyser.getByteTimeDomainData(node.timeBuf);
+        let sumSq = 0;
+        for (let i = 0; i < node.timeBuf.length; i++) {
+          const v = (node.timeBuf[i] - 128) / 128;
+          sumSq += v * v;
+        }
+        const rms = Math.sqrt(sumSq / node.timeBuf.length);
+        const delta = rms - node.prevRMS;
+        node.prevRMS = rms;
+        node.cooldown = Math.max(0, node.cooldown - 1);
+        if (node.cooldown === 0 && delta > 0.04 && rms > 0.06) {
+          node.cooldown = 8;
+          this.opts.onOnset(idx); // 0=vocals, 1=drums, 2=bass, 3=other
+        }
+      });
     }
   };
 }
