@@ -84,7 +84,7 @@ export function tempoClass(bpm: number): { label: string; phrase: string } {
  * within an 8-year span is treated as "from one period of you." Krumhansl &
  * Zupnick 2013, replicated 2025 across 84 countries.
  */
-function eraNarration(years: number[]): string | null {
+export function eraNarration(years: number[]): string | null {
   const valid = years.filter((y): y is number => Number.isFinite(y));
   if (valid.length === 0) return null;
   const min = Math.min(...valid);
