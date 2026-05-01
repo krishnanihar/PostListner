@@ -1,6 +1,7 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
+import JSZip from 'jszip';
 import { Score, MARGIN_X, VB_W } from '@/score/Score';
 import { BreathPacer } from '@/score/BreathPacer';
 import { COLORS, FONTS } from '@/score/tokens';
@@ -8,6 +9,25 @@ import { useStore } from '@/lib/store';
 import { resolveSelection, computeAVD } from '@/lib/scoring';
 import { buildCompositionPlan } from '@/lib/compositionPlan';
 import { isOfflineMode } from '@/lib/env';
+
+async function unzipStems(
+  buf: ArrayBuffer
+): Promise<{ vocals: string; drums: string; bass: string; other: string } | null> {
+  try {
+    const zip = await JSZip.loadAsync(buf);
+    const names = ['vocals', 'drums', 'bass', 'other'] as const;
+    const out: Record<string, string> = {};
+    for (const n of names) {
+      const f = zip.file(`${n}.mp3`);
+      if (!f) return null;
+      const blob = await f.async('blob');
+      out[n] = URL.createObjectURL(new Blob([blob], { type: 'audio/mpeg' }));
+    }
+    return out as { vocals: string; drums: string; bass: string; other: string };
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Phase 7 — Composing. Three-act ritual wait per Research/wait-as-ritual:
@@ -121,6 +141,21 @@ export function Wait() {
         const blob = await res.blob();
         const url = URL.createObjectURL(blob);
         setSessionTrack(url, title, 'ready');
+        // Background-stream stems unzip — do NOT block the ritual on this.
+        // Listening will fall back to single-source onsets if stems aren't
+        // ready by the time Reveal hands off.
+        fetch('/api/stems', {
+          method: 'POST',
+          headers: { 'Content-Type': 'audio/mpeg' },
+          body: blob,
+        })
+          .then(async (sr) => {
+            if (!sr.ok) return;
+            const zipBuf = await sr.arrayBuffer();
+            const stems = await unzipStems(zipBuf);
+            if (stems) useStore.getState().setSessionStems(stems);
+          })
+          .catch(() => {});
         setAudioReadyAt(performance.now());
       } catch {
         useFallback('error');
