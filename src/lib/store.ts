@@ -61,6 +61,16 @@ export interface AppState {
     status: AppState['sessionGenStatus']
   ) => void;
   setSessionStems: (stems: AppState['sessionStemUrls']) => void;
+
+  // phase E — screening + consent + gentle path
+  screened: boolean;
+  screeningFlags: { psychosis: boolean; dissociation: boolean; ptsd: boolean; distressed: boolean };
+  consentedAt: number | null;
+  gentlePath: boolean;
+  setScreened: (flags: AppState['screeningFlags']) => void;
+  setConsented: () => void;
+  setGentlePath: (on: boolean) => void;
+
   reset: () => void;
 }
 
@@ -84,6 +94,10 @@ const initialState = {
   sessionTrackTitle: null as string | null,
   sessionGenStatus: 'idle' as AppState['sessionGenStatus'],
   sessionStemUrls: null as AppState['sessionStemUrls'],
+  screened: false,
+  screeningFlags: { psychosis: false, dissociation: false, ptsd: false, distressed: false },
+  consentedAt: null as number | null,
+  gentlePath: false,
 };
 
 export const useStore = create<AppState>((set) => ({
@@ -169,6 +183,17 @@ export const useStore = create<AppState>((set) => ({
 
   setSessionStems: (stems) => set({ sessionStemUrls: stems }),
 
+  setScreened: (flags) =>
+    set({
+      screened: true,
+      screeningFlags: flags,
+      gentlePath: flags.psychosis || flags.dissociation || flags.ptsd || flags.distressed,
+    }),
+
+  setConsented: () => set({ consentedAt: Date.now() }),
+
+  setGentlePath: (on) => set({ gentlePath: on }),
+
   reset: () =>
     set(() => ({
       ...initialState,
@@ -185,5 +210,9 @@ export const useStore = create<AppState>((set) => ({
       sessionTrackTitle: null,
       sessionGenStatus: 'idle',
       sessionStemUrls: null,
+      screened: false,
+      screeningFlags: { psychosis: false, dissociation: false, ptsd: false, distressed: false },
+      consentedAt: null,
+      gentlePath: false,
     })),
 }));
