@@ -6,6 +6,7 @@ import { Vox } from '@/score/marks';
 import { COLORS, FONTS } from '@/score/tokens';
 import { SONG_PROMPTS } from '@/data/songs';
 import { useStore } from '@/lib/store';
+import { eraNarration } from '@/lib/reflection';
 import { searchSongs, formatSuggestion, type SongSuggestion } from '@/lib/songSearch';
 import { AdmirerLine } from '@/components/AdmirerLine';
 
@@ -26,6 +27,7 @@ const PROMPT_CONTEXT = [
 export function ThreeSongs() {
   const songIndex = useStore((s) => s.songIndex);
   const songs = useStore((s) => s.songs);
+  const songYears = useStore((s) => s.songYears);
   const setSong = useStore((s) => s.setSong);
   const nextSong = useStore((s) => s.nextSong);
 
@@ -36,6 +38,16 @@ export function ThreeSongs() {
   const [suggestions, setSuggestions] = useState<SongSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
   const [received, setReceived] = useState<{ year: number | null; title: string } | null>(null);
+
+  // Inline reminiscence-bump callback — Krumhansl & Zupnick 2013, replicated
+  // 2025 across 84 countries. Surfaces only on the third song's received
+  // beat, when at least two valid release years have been captured.
+  const inlineEraLine = (() => {
+    if (songIndex !== 2 || !received) return null;
+    const validYears = songYears.filter((y): y is number => Number.isFinite(y as number));
+    if (validYears.length < 2) return null;
+    return eraNarration(validYears);
+  })();
 
   // Reset draft + suggestions on each prompt
   useEffect(() => {
@@ -318,6 +330,23 @@ export function ThreeSongs() {
               >
                 {PROMPT_CONTEXT[songIndex] ?? ''}
               </div>
+              {inlineEraLine && (
+                <div
+                  style={{
+                    fontFamily: FONTS.serif,
+                    fontStyle: 'italic',
+                    fontSize: 13,
+                    color: COLORS.inkCreamSecondary,
+                    textAlign: 'center',
+                    maxWidth: 280,
+                    marginTop: 14,
+                    opacity: 0,
+                    animation: 'sceneFade 1.2s 0.6s ease-out forwards',
+                  }}
+                >
+                  {inlineEraLine}
+                </div>
+              )}
             </div>
           )}
         </>
