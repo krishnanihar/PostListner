@@ -58,12 +58,18 @@ interface Section {
 }
 
 const SECTIONS: Section[] = [
-  { key: 'threshold',   start:      0, end:  30_000, panDriftWidth: 0.3, panDriftPeriod: 18, filterHz: 8000, wetMix: 0.05, masterGain: 0.85, detuneCents:  0 },
-  { key: 'release',     start: 30_000, end:  75_000, panDriftWidth: 1.0, panDriftPeriod: 12, filterHz: 4000, wetMix: 0.25, masterGain: 0.90, detuneCents:  8 },
-  { key: 'peak',        start: 75_000, end: 120_000, panDriftWidth: 1.5, panDriftPeriod:  9, filterHz: 1500, wetMix: 0.70, masterGain: 0.95, detuneCents: 22 },
-  { key: 'return',      start:120_000, end: 150_000, panDriftWidth: 0.8, panDriftPeriod: 11, filterHz: 3500, wetMix: 0.40, masterGain: 0.95, detuneCents: 10 },
-  { key: 'homecoming',  start:150_000, end: 170_000, panDriftWidth: 0.2, panDriftPeriod: 14, filterHz: 6000, wetMix: 0.15, masterGain: 0.90, detuneCents:  0 },
-  { key: 'silence',     start:170_000, end: 180_000, panDriftWidth: 0.0, panDriftPeriod: 14, filterHz: 5000, wetMix: 0.10, masterGain: 0.00, detuneCents:  0 },
+  // 0:00–1:00 — threshold. Conducting still works; orchestra introduces autonomous behaviors.
+  { key: 'threshold',  start:       0, end:  60_000, panDriftWidth: 0.3, panDriftPeriod: 18, filterHz: 8000, wetMix: 0.05, masterGain: 0.85, detuneCents:  0 },
+  // 1:00–2:30 — release. Onset offsets begin; common fate diverges; spatial widens.
+  { key: 'release',    start:  60_000, end: 150_000, panDriftWidth: 1.0, panDriftPeriod: 12, filterHz: 4500, wetMix: 0.30, masterGain: 0.90, detuneCents:  6 },
+  // 2:30–3:30 — peak. Bregman fully degraded; Wegner priority broken; ego-loosening peak.
+  { key: 'peak',       start: 150_000, end: 210_000, panDriftWidth: 1.5, panDriftPeriod:  9, filterHz: 1500, wetMix: 0.70, masterGain: 0.92, detuneCents: 22 },
+  // 3:30–4:30 — return. Inverse Bregman; agency briefly reappears as a gift.
+  { key: 'return',     start: 210_000, end: 270_000, panDriftWidth: 0.6, panDriftPeriod: 11, filterHz: 3500, wetMix: 0.40, masterGain: 0.93, detuneCents:  8 },
+  // 4:30–5:30 — homecoming. Plagal warmth; gesture re-engages briefly.
+  { key: 'homecoming', start: 270_000, end: 330_000, panDriftWidth: 0.2, panDriftPeriod: 14, filterHz: 6500, wetMix: 0.18, masterGain: 0.90, detuneCents:  0 },
+  // 5:30–6:00 — silence. Master ramps to 0; advance phase 10.
+  { key: 'silence',    start: 330_000, end: 360_000, panDriftWidth: 0.0, panDriftPeriod: 14, filterHz: 5000, wetMix: 0.10, masterGain: 0.00, detuneCents:  0 },
 ];
 const ARC_TOTAL_MS = SECTIONS[SECTIONS.length - 1].end;
 
