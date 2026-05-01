@@ -4,6 +4,7 @@ import { useStore } from '@/lib/store';
 import { TopBar } from '@/components/TopBar';
 import { Controls } from '@/components/Controls';
 import { NotesDrawer } from '@/components/NotesDrawer';
+import { Welcome } from '@/components/phases/Welcome';
 import { Threshold } from '@/components/phases/Threshold';
 import { Pairwise } from '@/components/phases/Pairwise';
 import { Gems } from '@/components/phases/Gems';
@@ -32,7 +33,13 @@ const PHASE_COMPONENTS = [
 
 export default function Page() {
   const phase = useStore((s) => s.phase);
+  const screened = useStore((s) => s.screened);
+  const consentedAt = useStore((s) => s.consentedAt);
   const Phase = PHASE_COMPONENTS[phase] ?? Threshold;
+
+  if (!screened || consentedAt === null) {
+    return <Welcome />;
+  }
 
   return (
     <>
