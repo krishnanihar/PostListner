@@ -14,13 +14,13 @@ export interface DissolutionLayerOpts {
   section: 'threshold' | 'release' | 'peak' | 'return' | 'homecoming' | 'silence';
 }
 
-const SECTION_GAINS: Record<DissolutionLayerOpts['section'], { drone: number; binaural: number }> = {
-  threshold:  { drone: 0.00, binaural: 0.00 },
-  release:    { drone: 0.05, binaural: 0.04 },
-  peak:       { drone: 0.12, binaural: 0.07 },
-  return:     { drone: 0.06, binaural: 0.04 },
-  homecoming: { drone: 0.02, binaural: 0.00 },
-  silence:    { drone: 0.00, binaural: 0.00 },
+const SECTION_GAINS: Record<DissolutionLayerOpts['section'], { drone: number; binaural: number; water: number }> = {
+  threshold:  { drone: 0.00, binaural: 0.00, water: 0.00 },
+  release:    { drone: 0.05, binaural: 0.04, water: 0.10 },
+  peak:       { drone: 0.12, binaural: 0.07, water: 0.18 },
+  return:     { drone: 0.06, binaural: 0.04, water: 0.12 },
+  homecoming: { drone: 0.02, binaural: 0.00, water: 0.05 },
+  silence:    { drone: 0.00, binaural: 0.00, water: 0.00 },
 };
 
 export class DissolutionLayers {
@@ -32,6 +32,8 @@ export class DissolutionLayers {
   private binauralRightGain: GainNode | null = null;
   private binauralMerger: ChannelMergerNode | null = null;
   private masterGain: GainNode | null = null;
+  private water: HTMLAudioElement | null = null;
+  private waterGain: GainNode | null = null;
 
   constructor(private ctx: AudioContext, output: AudioNode) {
     // Drone: 60 Hz sine into a gain into the output. No HRTF — the sub-bass
@@ -71,6 +73,21 @@ export class DissolutionLayers {
     leftOsc.start();
     rightOsc.start();
 
+    // Water field-recording: looping HTMLAudioElement routed through a gain
+    // into the same master so it ducks together with drone + binaural on stop.
+    // Asset is sourced out-of-band; if missing, .play() rejects silently and
+    // this layer is a no-op.
+    this.water = new Audio('/audio/ambient/water_loop.mp3');
+    this.water.loop = true;
+    this.water.crossOrigin = 'anonymous';
+    const waterSource = ctx.createMediaElementSource(this.water);
+    const waterGain = ctx.createGain();
+    waterGain.gain.value = 0;
+    waterSource.connect(waterGain);
+    waterGain.connect(master);
+    this.waterGain = waterGain;
+    this.water.play().catch(() => {}); // no-op if asset missing
+
     this.droneOsc = droneOsc;
     this.droneGain = droneGain;
     this.binauralLeftOsc = leftOsc;
@@ -90,6 +107,7 @@ export class DissolutionLayers {
     this.droneGain.gain.setTargetAtTime(targets.drone, t, SMOOTH);
     this.binauralLeftGain.gain.setTargetAtTime(targets.binaural, t, SMOOTH);
     this.binauralRightGain.gain.setTargetAtTime(targets.binaural, t, SMOOTH);
+    this.waterGain?.gain.setTargetAtTime(targets.water, t, SMOOTH);
   }
 
   stop() {
@@ -105,6 +123,7 @@ export class DissolutionLayers {
       try { this.droneOsc?.stop(); } catch {}
       try { this.binauralLeftOsc?.stop(); } catch {}
       try { this.binauralRightOsc?.stop(); } catch {}
+      try { this.water?.pause(); } catch {}
     }, 600);
   }
 }
