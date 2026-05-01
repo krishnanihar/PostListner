@@ -35,6 +35,7 @@ import { COLORS, FONTS } from '@/score/tokens';
 import { useStore } from '@/lib/store';
 import { resolveSelection } from '@/lib/scoring';
 import { AdmirerLine } from '@/components/AdmirerLine';
+import { DissolutionLayers } from '@/lib/dissolutionLayers';
 
 const STEM_NAMES = ['vocals', 'drums', 'bass', 'other'];
 const STEM_Y = [200, 290, 380, 470];
@@ -123,6 +124,7 @@ class ListeningEngine {
   private panner: PannerNode | null = null;
   private masterGain: GainNode | null = null;
   private analyser: AnalyserNode | null = null;
+  private layers: DissolutionLayers | null = null;
   private rafId = 0;
   private startedAt = 0;
   private running = false;
@@ -219,6 +221,10 @@ class ListeningEngine {
     // Fade master in over 1.2s to the section baseline.
     masterGain.gain.linearRampToValueAtTime(SECTIONS[0].masterGain, ctx.currentTime + 1.2);
 
+    // Sub-bass drone + theta binaural layers — connected into the master path
+    // so they ride the section's masterGain envelope (fades in/out across the arc).
+    this.layers = new DissolutionLayers(ctx, masterGain);
+
     await audio.play().catch(() => {});
 
     this.ctx = ctx;
@@ -242,6 +248,7 @@ class ListeningEngine {
     this.running = false;
     cancelAnimationFrame(this.rafId);
     this.detachGestureListeners();
+    this.layers?.stop();
     try {
       if (this.masterGain && this.ctx) {
         const t = this.ctx.currentTime;
@@ -321,6 +328,7 @@ class ListeningEngine {
 
     // Compute section blend (cross-fade across the last 1.5s of each section).
     const { sec, next } = this.currentSection(elapsed);
+    this.layers?.setSection(sec.key as 'threshold' | 'release' | 'peak' | 'return' | 'homecoming' | 'silence');
     const blendStart = sec.end - 1500;
     const blendT = elapsed > blendStart ? Math.min(1, (elapsed - blendStart) / 1500) : 0;
 
