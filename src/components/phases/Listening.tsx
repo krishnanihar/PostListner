@@ -55,21 +55,27 @@ interface Section {
   masterGain: number;
   /** Detune in cents applied via playbackRate (10c ~ 0.0058 rate offset). */
   detuneCents: number;
+  /** 0 = full gesture-to-sound exclusivity. 1 = orchestra fully autonomous. */
+  exclusivityBroken: number;
+  /** 0 = consistent gesture mapping. 1 = mapping fully scrambled. */
+  consistencyBroken: number;
+  /** Delay between gesture and effect, in ms. 0 = immediate. 1000+ = decoupled. */
+  priorityDelayMs: number;
 }
 
 const SECTIONS: Section[] = [
   // 0:00–1:00 — threshold. Conducting still works; orchestra introduces autonomous behaviors.
-  { key: 'threshold',  start:       0, end:  60_000, panDriftWidth: 0.3, panDriftPeriod: 18, filterHz: 8000, wetMix: 0.05, masterGain: 0.85, detuneCents:  0 },
+  { key: 'threshold',  start:       0, end:  60_000, panDriftWidth: 0.3, panDriftPeriod: 18, filterHz: 8000, wetMix: 0.05, masterGain: 0.85, detuneCents:  0, exclusivityBroken: 0.15, consistencyBroken: 0.00, priorityDelayMs:    0 },
   // 1:00–2:30 — release. Onset offsets begin; common fate diverges; spatial widens.
-  { key: 'release',    start:  60_000, end: 150_000, panDriftWidth: 1.0, panDriftPeriod: 12, filterHz: 4500, wetMix: 0.30, masterGain: 0.90, detuneCents:  6 },
+  { key: 'release',    start:  60_000, end: 150_000, panDriftWidth: 1.0, panDriftPeriod: 12, filterHz: 4500, wetMix: 0.30, masterGain: 0.90, detuneCents:  6, exclusivityBroken: 0.45, consistencyBroken: 0.30, priorityDelayMs:    0 },
   // 2:30–3:30 — peak. Bregman fully degraded; Wegner priority broken; ego-loosening peak.
-  { key: 'peak',       start: 150_000, end: 210_000, panDriftWidth: 1.5, panDriftPeriod:  9, filterHz: 1500, wetMix: 0.70, masterGain: 0.92, detuneCents: 22 },
+  { key: 'peak',       start: 150_000, end: 210_000, panDriftWidth: 1.5, panDriftPeriod:  9, filterHz: 1500, wetMix: 0.70, masterGain: 0.92, detuneCents: 22, exclusivityBroken: 0.85, consistencyBroken: 0.85, priorityDelayMs: 1200 },
   // 3:30–4:30 — return. Inverse Bregman; agency briefly reappears as a gift.
-  { key: 'return',     start: 210_000, end: 270_000, panDriftWidth: 0.6, panDriftPeriod: 11, filterHz: 3500, wetMix: 0.40, masterGain: 0.93, detuneCents:  8 },
+  { key: 'return',     start: 210_000, end: 270_000, panDriftWidth: 0.6, panDriftPeriod: 11, filterHz: 3500, wetMix: 0.40, masterGain: 0.93, detuneCents:  8, exclusivityBroken: 0.50, consistencyBroken: 0.40, priorityDelayMs:  600 },
   // 4:30–5:30 — homecoming. Plagal warmth; gesture re-engages briefly.
-  { key: 'homecoming', start: 270_000, end: 330_000, panDriftWidth: 0.2, panDriftPeriod: 14, filterHz: 6500, wetMix: 0.18, masterGain: 0.90, detuneCents:  0 },
+  { key: 'homecoming', start: 270_000, end: 330_000, panDriftWidth: 0.2, panDriftPeriod: 14, filterHz: 6500, wetMix: 0.18, masterGain: 0.90, detuneCents:  0, exclusivityBroken: 0.10, consistencyBroken: 0.05, priorityDelayMs:    0 },
   // 5:30–6:00 — silence. Master ramps to 0; advance phase 10.
-  { key: 'silence',    start: 330_000, end: 360_000, panDriftWidth: 0.0, panDriftPeriod: 14, filterHz: 5000, wetMix: 0.10, masterGain: 0.00, detuneCents:  0 },
+  { key: 'silence',    start: 330_000, end: 360_000, panDriftWidth: 0.0, panDriftPeriod: 14, filterHz: 5000, wetMix: 0.10, masterGain: 0.00, detuneCents:  0, exclusivityBroken: 0.00, consistencyBroken: 0.00, priorityDelayMs:    0 },
 ];
 const ARC_TOTAL_MS = SECTIONS[SECTIONS.length - 1].end;
 
@@ -136,6 +142,11 @@ class ListeningEngine {
   private onsetCooldown = 0;
   private freqBuf: Uint8Array<ArrayBuffer> | null = null;
   private timeBuf: Uint8Array<ArrayBuffer> | null = null;
+
+  // Wegner priority: queue raw inputs and consume them N frames later (60fps frame budget).
+  private rollQueue: number[] = [];
+  private pitchQueue: number[] = [];
+  private accelQueue: number[] = [];
 
   constructor(private opts: EngineOpts) {}
 
@@ -305,16 +316,6 @@ class ListeningEngine {
       return;
     }
 
-    // Smooth gesture (single-pole low-pass; α tuned for ~10Hz settling).
-    const ALPHA = 0.18;
-    const useDevice = this.gestureActive;
-    const targetRoll = useDevice ? this.rawRoll : this.pointerRoll;
-    const targetPitch = useDevice ? this.rawPitch : this.pointerPitch;
-    const targetAccel = useDevice ? this.rawAccel : 0;
-    this.gRoll  += ALPHA * (targetRoll  - this.gRoll);
-    this.gPitch += ALPHA * (targetPitch - this.gPitch);
-    this.gAccel += ALPHA * (targetAccel - this.gAccel);
-
     // Compute section blend (cross-fade across the last 1.5s of each section).
     const { sec, next } = this.currentSection(elapsed);
     const blendStart = sec.end - 1500;
@@ -328,15 +329,50 @@ class ListeningEngine {
     const driftPeriod = lerpSec(sec.panDriftPeriod, next.panDriftPeriod);
     const detuneCents = lerpSec(sec.detuneCents, next.detuneCents);
 
+    const useDevice = this.gestureActive;
+
+    // Wegner priority: queue raw inputs and consume them N frames later (60fps frame budget).
+    // At break=0 the head of the queue is the live sample; as delay grows the user feels lag.
+    const blendedDelayMs = lerpSec(sec.priorityDelayMs, next.priorityDelayMs);
+    const delayFrames = Math.round(blendedDelayMs / 16.67); // 60fps
+    this.rollQueue.push(useDevice ? this.rawRoll : this.pointerRoll);
+    this.pitchQueue.push(useDevice ? this.rawPitch : this.pointerPitch);
+    this.accelQueue.push(useDevice ? this.rawAccel : 0);
+    const cap = Math.max(1, delayFrames + 1);
+    while (this.rollQueue.length > cap) this.rollQueue.shift();
+    while (this.pitchQueue.length > cap) this.pitchQueue.shift();
+    while (this.accelQueue.length > cap) this.accelQueue.shift();
+    const targetRoll = this.rollQueue[0];
+    const targetPitch = this.pitchQueue[0];
+    const targetAccel = this.accelQueue[0];
+
+    // Smooth gesture (single-pole low-pass; α tuned for ~10Hz settling).
+    // Longer priority delay → heavier smoothing so the lagged samples don't read as jitter.
+    const ALPHA = blendedDelayMs > 200 ? 0.10 : 0.18;
+    this.gRoll  += ALPHA * (targetRoll  - this.gRoll);
+    this.gPitch += ALPHA * (targetPitch - this.gPitch);
+    this.gAccel += ALPHA * (targetAccel - this.gAccel);
+
+    // Wegner consistency: at break=1, roll drives filter and pitch drives pan — the user's intuition fails.
+    const blendedConsistency = lerpSec(sec.consistencyBroken, next.consistencyBroken);
+    const effectiveRoll = this.gRoll * (1 - blendedConsistency) + this.gPitch * blendedConsistency;
+    const effectivePitch = this.gPitch * (1 - blendedConsistency) + this.gRoll * blendedConsistency;
+
     // Section-driven slow spatial drift — sinusoidal sweep around 0.
     const sweep = Math.sin((elapsed / 1000 / Math.max(1, driftPeriod)) * Math.PI * 2);
     const panBase = sweep * driftWidth;
 
+    // Wegner exclusivity: at break=1, the orchestra has its own oscillator the user
+    // did not cause. At break=0, gesture has full authority.
+    const blendedExclusivity = lerpSec(sec.exclusivityBroken, next.exclusivityBroken);
+    const autonomousPan = Math.sin((elapsed / 1000 / 7) * Math.PI * 2) * 0.6 * blendedExclusivity;
+    const gestureWeight = 1 - blendedExclusivity * 0.6; // never fully zero — pointer fallback still feels alive
+
     // Gesture deltas, bounded so the section's macro shape always reads.
-    const panFinal = Math.max(-2, Math.min(2, panBase + this.gRoll * 1.2));
+    const panFinal = Math.max(-2, Math.min(2, panBase + effectiveRoll * 1.2 * gestureWeight + autonomousPan));
     const filterFinal = Math.max(
       400,
-      Math.min(14000, baseFilter * Math.pow(2, this.gPitch * 1.0))
+      Math.min(14000, baseFilter * Math.pow(2, effectivePitch * 1.0))
     );
     const masterFinal = Math.max(0, Math.min(1.05, baseMaster + this.gAccel * 0.08));
 
