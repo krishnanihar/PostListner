@@ -3,13 +3,19 @@ import { createReadStream, existsSync } from 'node:fs';
 import { writeFile, mkdir } from 'node:fs/promises';
 import { join } from 'node:path';
 import { isOfflineMode } from '@/lib/env';
+import type { CompositionPlan } from '@/lib/compositionPlan';
 
 /**
  * POST /api/compose
  *
- * Body: { prompt: string, lengthMs: number, seed?: number, key?: string,
- *         forceInstrumental?: boolean, bucket?: 'pairs' | 'gems' | 'audition' | 'session' }
+ * Body: { prompt?: string, compositionPlan?: CompositionPlan, lengthMs?: number,
+ *         seed?: number, key?: string, forceInstrumental?: boolean,
+ *         bucket?: 'pairs' | 'gems' | 'audition' | 'session' }
  * Returns: audio/mpeg
+ *
+ * Either `prompt` or `compositionPlan` must be set, but never both — the
+ * ElevenLabs Music API rejects requests that combine them. `seed` is only
+ * meaningful with `compositionPlan` (incompatible with `prompt`).
  *
  * Proxies to ElevenLabs Music. If `key` is provided and the bucket is one of
  * the static buckets (`pairs`, `gems`, `audition`), the result is cached to
@@ -21,6 +27,7 @@ export const runtime = 'nodejs';
 
 interface ComposeRequest {
   prompt?: string;
+  compositionPlan?: CompositionPlan;
   lengthMs?: number;
   seed?: number;
   key?: string;
@@ -48,12 +55,30 @@ export async function POST(req: NextRequest) {
   }
 
   const prompt = (body.prompt ?? '').trim();
+  const compositionPlan = body.compositionPlan;
   const lengthMs = body.lengthMs ?? 30000;
   const bucket = body.bucket ?? 'session';
   const cacheKey = body.key;
 
-  if (!prompt) return NextResponse.json({ error: 'prompt required' }, { status: 400 });
-  if (lengthMs < 3000 || lengthMs > 600000) {
+  // Exactly one of prompt / compositionPlan — ElevenLabs rejects both-set, and
+  // we'd have nothing to send if neither is set.
+  const hasPrompt = prompt.length > 0;
+  const hasPlan = compositionPlan != null;
+  if (hasPrompt && hasPlan) {
+    return NextResponse.json(
+      { error: 'set either prompt or compositionPlan, not both' },
+      { status: 400 }
+    );
+  }
+  if (!hasPrompt && !hasPlan) {
+    return NextResponse.json(
+      { error: 'prompt or compositionPlan required' },
+      { status: 400 }
+    );
+  }
+  // lengthMs is only consulted in prompt mode; composition_plan owns its own
+  // per-section durations.
+  if (hasPrompt && (lengthMs < 3000 || lengthMs > 600000)) {
     return NextResponse.json({ error: 'lengthMs must be 3000–600000' }, { status: 400 });
   }
 
@@ -82,14 +107,20 @@ export async function POST(req: NextRequest) {
   const url =
     'https://api.elevenlabs.io/v1/music?output_format=mp3_44100_128';
   const requestBody: Record<string, unknown> = {
-    prompt,
-    music_length_ms: lengthMs,
     model_id: 'music_v1',
   };
-  // `seed` is incompatible with `prompt` per the ElevenLabs Music API —
-  // only used when posting a structured composition_plan. Prompt-mode
-  // requests omit seed entirely.
-  if (body.forceInstrumental != null) requestBody.force_instrumental = body.forceInstrumental;
+  if (hasPlan) {
+    // composition_plan mode: plan owns its per-section durations, so omit
+    // music_length_ms. `seed` is allowed (and only allowed) here.
+    requestBody.composition_plan = compositionPlan;
+    if (typeof body.seed === 'number') requestBody.seed = body.seed;
+  } else {
+    // prompt mode: `seed` is incompatible with `prompt` per the ElevenLabs
+    // Music API, so omit it entirely.
+    requestBody.prompt = prompt;
+    requestBody.music_length_ms = lengthMs;
+    if (body.forceInstrumental != null) requestBody.force_instrumental = body.forceInstrumental;
+  }
 
   const elevenRes = await fetch(url, {
     method: 'POST',
