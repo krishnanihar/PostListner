@@ -36,6 +36,8 @@ export interface AppState {
   sessionTrackTitle: string | null;
   /** Generation pipeline state, surfaced by Wait/Reveal/Listening. */
   sessionGenStatus: 'idle' | 'composing' | 'ready' | 'fallback' | 'error';
+  /** 4-stem URLs from the demucs sidecar — populated post-compose. */
+  sessionStemUrls: { vocals: string; drums: string; bass: string; other: string } | null;
 
   // actions
   setPhase: (phase: number) => void;
@@ -58,6 +60,7 @@ export interface AppState {
     title: string | null,
     status: AppState['sessionGenStatus']
   ) => void;
+  setSessionStems: (stems: AppState['sessionStemUrls']) => void;
   reset: () => void;
 }
 
@@ -80,6 +83,7 @@ const initialState = {
   sessionTrackUrl: null as string | null,
   sessionTrackTitle: null as string | null,
   sessionGenStatus: 'idle' as AppState['sessionGenStatus'],
+  sessionStemUrls: null as AppState['sessionStemUrls'],
 };
 
 export const useStore = create<AppState>((set) => ({
@@ -163,6 +167,8 @@ export const useStore = create<AppState>((set) => ({
   setSessionTrack: (url, title, status) =>
     set({ sessionTrackUrl: url, sessionTrackTitle: title, sessionGenStatus: status }),
 
+  setSessionStems: (stems) => set({ sessionStemUrls: stems }),
+
   reset: () =>
     set(() => ({
       ...initialState,
@@ -178,5 +184,6 @@ export const useStore = create<AppState>((set) => ({
       sessionTrackUrl: null,
       sessionTrackTitle: null,
       sessionGenStatus: 'idle',
+      sessionStemUrls: null,
     })),
 }));
