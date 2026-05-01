@@ -65,21 +65,23 @@ interface Section {
   priorityDelayMs: number;
   /** 0 = clean. 1 = max chorus-style timbral blur via fast LFO on filter. */
   timbralBlur: number;
+  /** Per-stem temporal offset applied at section start, in ms. Bregman onset-synchrony cue. */
+  onsetOffsetMs?: number;
 }
 
 const SECTIONS: Section[] = [
   // 0:00–1:00 — threshold. Conducting still works; orchestra introduces autonomous behaviors.
-  { key: 'threshold',  start:       0, end:  60_000, panDriftWidth: 0.3, panDriftPeriod: 18, filterHz: 8000, wetMix: 0.05, masterGain: 0.85, detuneCents:  0, exclusivityBroken: 0.15, consistencyBroken: 0.00, priorityDelayMs:    0, timbralBlur: 0.00 },
+  { key: 'threshold',  start:       0, end:  60_000, panDriftWidth: 0.3, panDriftPeriod: 18, filterHz: 8000, wetMix: 0.05, masterGain: 0.85, detuneCents:  0, exclusivityBroken: 0.15, consistencyBroken: 0.00, priorityDelayMs:    0, timbralBlur: 0.00, onsetOffsetMs:  0 },
   // 1:00–2:30 — release. Onset offsets begin; common fate diverges; spatial widens.
-  { key: 'release',    start:  60_000, end: 150_000, panDriftWidth: 1.0, panDriftPeriod: 12, filterHz: 4500, wetMix: 0.30, masterGain: 0.90, detuneCents:  6, exclusivityBroken: 0.45, consistencyBroken: 0.30, priorityDelayMs:    0, timbralBlur: 0.15 },
+  { key: 'release',    start:  60_000, end: 150_000, panDriftWidth: 1.0, panDriftPeriod: 12, filterHz: 4500, wetMix: 0.30, masterGain: 0.90, detuneCents:  6, exclusivityBroken: 0.45, consistencyBroken: 0.30, priorityDelayMs:    0, timbralBlur: 0.15, onsetOffsetMs: 30 },
   // 2:30–3:30 — peak. Bregman fully degraded; Wegner priority broken; ego-loosening peak.
-  { key: 'peak',       start: 150_000, end: 210_000, panDriftWidth: 1.5, panDriftPeriod:  9, filterHz: 1500, wetMix: 0.70, masterGain: 0.92, detuneCents: 22, exclusivityBroken: 0.85, consistencyBroken: 0.85, priorityDelayMs: 1200, timbralBlur: 0.55 },
+  { key: 'peak',       start: 150_000, end: 210_000, panDriftWidth: 1.5, panDriftPeriod:  9, filterHz: 1500, wetMix: 0.70, masterGain: 0.92, detuneCents: 22, exclusivityBroken: 0.85, consistencyBroken: 0.85, priorityDelayMs: 1200, timbralBlur: 0.55, onsetOffsetMs: 80 },
   // 3:30–4:30 — return. Inverse Bregman; agency briefly reappears as a gift.
-  { key: 'return',     start: 210_000, end: 270_000, panDriftWidth: 0.6, panDriftPeriod: 11, filterHz: 3500, wetMix: 0.40, masterGain: 0.93, detuneCents:  8, exclusivityBroken: 0.50, consistencyBroken: 0.40, priorityDelayMs:  600, timbralBlur: 0.20 },
+  { key: 'return',     start: 210_000, end: 270_000, panDriftWidth: 0.6, panDriftPeriod: 11, filterHz: 3500, wetMix: 0.40, masterGain: 0.93, detuneCents:  8, exclusivityBroken: 0.50, consistencyBroken: 0.40, priorityDelayMs:  600, timbralBlur: 0.20, onsetOffsetMs: 40 },
   // 4:30–5:30 — homecoming. Plagal warmth; gesture re-engages briefly.
-  { key: 'homecoming', start: 270_000, end: 330_000, panDriftWidth: 0.2, panDriftPeriod: 14, filterHz: 6500, wetMix: 0.18, masterGain: 0.90, detuneCents:  0, exclusivityBroken: 0.10, consistencyBroken: 0.05, priorityDelayMs:    0, timbralBlur: 0.05 },
+  { key: 'homecoming', start: 270_000, end: 330_000, panDriftWidth: 0.2, panDriftPeriod: 14, filterHz: 6500, wetMix: 0.18, masterGain: 0.90, detuneCents:  0, exclusivityBroken: 0.10, consistencyBroken: 0.05, priorityDelayMs:    0, timbralBlur: 0.05, onsetOffsetMs:  0 },
   // 5:30–6:00 — silence. Master ramps to 0; advance phase 10.
-  { key: 'silence',    start: 330_000, end: 360_000, panDriftWidth: 0.0, panDriftPeriod: 14, filterHz: 5000, wetMix: 0.10, masterGain: 0.00, detuneCents:  0, exclusivityBroken: 0.00, consistencyBroken: 0.00, priorityDelayMs:    0, timbralBlur: 0.00 },
+  { key: 'silence',    start: 330_000, end: 360_000, panDriftWidth: 0.0, panDriftPeriod: 14, filterHz: 5000, wetMix: 0.10, masterGain: 0.00, detuneCents:  0, exclusivityBroken: 0.00, consistencyBroken: 0.00, priorityDelayMs:    0, timbralBlur: 0.00, onsetOffsetMs:  0 },
 ];
 const ARC_TOTAL_MS = SECTIONS[SECTIONS.length - 1].end;
 
@@ -108,6 +110,7 @@ async function buildRoomIR(ctx: AudioContext): Promise<AudioBuffer> {
 
 interface EngineOpts {
   url: string;
+  stemUrls?: { vocals: string; drums: string; bass: string; other: string } | null;
   onArcEnd: () => void;
   onOnset: (stemIdx: number) => void;
 }
@@ -153,6 +156,19 @@ class ListeningEngine {
   private pitchQueue: number[] = [];
   private accelQueue: number[] = [];
 
+  // Multi-stem HRTF chains. Empty when stems aren't available — the single-source
+  // path (this.source/filter/dryGain/wetGain/panner) covers that case as graceful fallback.
+  private stemNodes: Array<{
+    audio: HTMLAudioElement;
+    source: MediaElementAudioSourceNode;
+    filter: BiquadFilterNode;
+    dryGain: GainNode;
+    wetGain: GainNode;
+    panner: PannerNode;
+  }> = [];
+  // Bregman onset-synchrony: only re-seek per-stem currentTime at section transitions.
+  private lastSectionIdx = -1;
+
   constructor(private opts: EngineOpts) {}
 
   async start() {
@@ -166,35 +182,8 @@ class ListeningEngine {
     const ctx = new Ctx();
     if (ctx.state === 'suspended') await ctx.resume().catch(() => {});
 
-    const audio = new Audio(this.opts.url);
-    audio.crossOrigin = 'anonymous';
-    audio.loop = true;
-    audio.preload = 'auto';
-
-    const source = ctx.createMediaElementSource(audio);
-
-    const filter = ctx.createBiquadFilter();
-    filter.type = 'lowpass';
-    filter.frequency.value = SECTIONS[0].filterHz;
-    filter.Q.value = 0.7;
-
-    const dryGain = ctx.createGain();
-    const wetGain = ctx.createGain();
-    dryGain.gain.value = 1 - SECTIONS[0].wetMix;
-    wetGain.gain.value = SECTIONS[0].wetMix;
-
     const convolver = ctx.createConvolver();
     convolver.buffer = await buildRoomIR(ctx);
-
-    const panner = ctx.createPanner();
-    panner.panningModel = 'HRTF';
-    panner.distanceModel = 'inverse';
-    panner.refDistance = 1;
-    panner.maxDistance = 10;
-    panner.rolloffFactor = 1;
-    panner.positionX.value = 0;
-    panner.positionY.value = 0;
-    panner.positionZ.value = -1;
 
     const masterGain = ctx.createGain();
     masterGain.gain.value = 0;
@@ -205,16 +194,67 @@ class ListeningEngine {
     this.freqBuf = new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount));
     this.timeBuf = new Uint8Array(new ArrayBuffer(analyser.fftSize));
 
-    // Graph: source → filter → split (dry|wet→convolver) → sum → panner →
-    // masterGain → destination, with analyser tapped off the master so the
-    // onset visual reflects what the listener actually hears.
-    source.connect(filter);
-    filter.connect(dryGain);
-    filter.connect(convolver);
-    convolver.connect(wetGain);
-    dryGain.connect(panner);
-    wetGain.connect(panner);
-    panner.connect(masterGain);
+    // Branch on stem availability: the multi-source HRTF graph gives each stem its
+    // own filter/dry-wet/panner chain so they can scatter spatially and temporally.
+    // The single-source path is graceful-degradation fallback when stems aren't ready.
+    if (this.opts.stemUrls) {
+      // Wet path needs convolver→destination wiring once; per-stem wetGain feeds
+      // the per-stem panner directly (see buildStemChains), so the convolver is
+      // shared but its output is already attached to each panner via wetGain.
+      // Wire convolver's output into the master path here so the wet bus reaches
+      // the destination through masterGain's envelope.
+      // (Note: the wet share is summed at each per-stem panner, so we don't need
+      // a separate convolver→masterGain wire here.)
+      await this.buildStemChains(ctx, this.opts.stemUrls, convolver, masterGain);
+    } else {
+      const audio = new Audio(this.opts.url);
+      audio.crossOrigin = 'anonymous';
+      audio.loop = true;
+      audio.preload = 'auto';
+
+      const source = ctx.createMediaElementSource(audio);
+
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = SECTIONS[0].filterHz;
+      filter.Q.value = 0.7;
+
+      const dryGain = ctx.createGain();
+      const wetGain = ctx.createGain();
+      dryGain.gain.value = 1 - SECTIONS[0].wetMix;
+      wetGain.gain.value = SECTIONS[0].wetMix;
+
+      const panner = ctx.createPanner();
+      panner.panningModel = 'HRTF';
+      panner.distanceModel = 'inverse';
+      panner.refDistance = 1;
+      panner.maxDistance = 10;
+      panner.rolloffFactor = 1;
+      panner.positionX.value = 0;
+      panner.positionY.value = 0;
+      panner.positionZ.value = -1;
+
+      // Graph: source → filter → split (dry|wet→convolver) → sum → panner →
+      // masterGain → destination, with analyser tapped off the master so the
+      // onset visual reflects what the listener actually hears.
+      source.connect(filter);
+      filter.connect(dryGain);
+      filter.connect(convolver);
+      convolver.connect(wetGain);
+      dryGain.connect(panner);
+      wetGain.connect(panner);
+      panner.connect(masterGain);
+
+      await audio.play().catch(() => {});
+
+      this.audio = audio;
+      this.source = source;
+      this.filter = filter;
+      this.dryGain = dryGain;
+      this.wetGain = wetGain;
+      this.panner = panner;
+    }
+
     masterGain.connect(analyser);
     masterGain.connect(ctx.destination);
 
@@ -225,22 +265,75 @@ class ListeningEngine {
     // so they ride the section's masterGain envelope (fades in/out across the arc).
     this.layers = new DissolutionLayers(ctx, masterGain);
 
-    await audio.play().catch(() => {});
-
     this.ctx = ctx;
-    this.audio = audio;
-    this.source = source;
-    this.filter = filter;
-    this.dryGain = dryGain;
-    this.wetGain = wetGain;
     this.convolver = convolver;
-    this.panner = panner;
     this.masterGain = masterGain;
     this.analyser = analyser;
     this.startedAt = performance.now();
     this.running = true;
     this.attachGestureListeners();
     this.tick();
+  }
+
+  /**
+   * Build four parallel HRTF chains, one per stem. Each stem carries its own
+   * filter / dry+wet split / panner so per-stem position can scatter as the
+   * dissolution arc progresses (Bregman spatial-coherence cue). The convolver
+   * is shared — wet share is summed at each per-stem panner.
+   */
+  private async buildStemChains(
+    ctx: AudioContext,
+    stems: NonNullable<EngineOpts['stemUrls']>,
+    convolver: ConvolverNode,
+    masterGain: GainNode,
+  ) {
+    const STEM_BASE_POS: Record<keyof typeof stems, [number, number, number]> = {
+      vocals: [ 0.0,  0.3, -1.0],
+      drums:  [-0.6,  0.0, -0.8],
+      bass:   [ 0.6,  0.0, -0.8],
+      other:  [ 0.0, -0.3, -1.2],
+    };
+    for (const name of ['vocals', 'drums', 'bass', 'other'] as const) {
+      const audio = new Audio(stems[name]);
+      audio.crossOrigin = 'anonymous';
+      audio.loop = false; // stems already cover the full arc
+      audio.preload = 'auto';
+
+      const source = ctx.createMediaElementSource(audio);
+
+      const filter = ctx.createBiquadFilter();
+      filter.type = 'lowpass';
+      filter.frequency.value = SECTIONS[0].filterHz;
+      filter.Q.value = 0.7;
+
+      const dryGain = ctx.createGain();
+      const wetGain = ctx.createGain();
+      dryGain.gain.value = 1 - SECTIONS[0].wetMix;
+      wetGain.gain.value = SECTIONS[0].wetMix;
+
+      const panner = ctx.createPanner();
+      panner.panningModel = 'HRTF';
+      panner.distanceModel = 'inverse';
+      panner.refDistance = 1;
+      panner.maxDistance = 10;
+      panner.rolloffFactor = 1;
+      const [px, py, pz] = STEM_BASE_POS[name];
+      panner.positionX.value = px;
+      panner.positionY.value = py;
+      panner.positionZ.value = pz;
+
+      // source → filter → split (dry direct + wet through shared convolver) → panner → master
+      source.connect(filter);
+      filter.connect(dryGain);
+      filter.connect(convolver);
+      convolver.connect(wetGain);
+      dryGain.connect(panner);
+      wetGain.connect(panner);
+      panner.connect(masterGain);
+
+      await audio.play().catch(() => {});
+      this.stemNodes.push({ audio, source, filter, dryGain, wetGain, panner });
+    }
   }
 
   stop() {
@@ -258,6 +351,7 @@ class ListeningEngine {
       }
     } catch {}
     try { this.audio?.pause(); } catch {}
+    this.stemNodes.forEach((n) => { try { n.audio.pause(); } catch {} });
     window.setTimeout(() => {
       try { this.ctx?.close(); } catch {}
     }, 600);
@@ -327,7 +421,7 @@ class ListeningEngine {
     }
 
     // Compute section blend (cross-fade across the last 1.5s of each section).
-    const { sec, next } = this.currentSection(elapsed);
+    const { idx, sec, next } = this.currentSection(elapsed);
     this.layers?.setSection(sec.key as 'threshold' | 'release' | 'peak' | 'return' | 'homecoming' | 'silence');
     const blendStart = sec.end - 1500;
     const blendT = elapsed > blendStart ? Math.min(1, (elapsed - blendStart) / 1500) : 0;
@@ -406,6 +500,33 @@ class ListeningEngine {
       this.audio.playbackRate = Math.pow(2, detuneCents / 1200);
     }
 
+    // Per-stem macro updates — each stem orbits a different phase offset so
+    // stems scatter spatially as panDriftWidth widens (Bregman spatial cue).
+    // No-ops when stemNodes is empty (single-source path).
+    const blendedSpatialScatter = lerpSec(sec.panDriftWidth, next.panDriftWidth);
+    this.stemNodes.forEach((node, i) => {
+      const orbit = Math.sin((elapsed / 1000 / 11) * Math.PI * 2 + i * (Math.PI / 2));
+      const stemPanX = panFinal + orbit * blendedSpatialScatter * 0.6;
+      node.panner.positionX.setTargetAtTime(stemPanX, this.ctx!.currentTime, 0.05);
+      node.filter.frequency.setTargetAtTime(filterFinal, this.ctx!.currentTime, 0.05);
+      node.dryGain.gain.setTargetAtTime(1 - baseWet, this.ctx!.currentTime, 0.05);
+      node.wetGain.gain.setTargetAtTime(baseWet, this.ctx!.currentTime, 0.05);
+      node.audio.playbackRate = Math.pow(2, detuneCents / 1200);
+    });
+
+    // Bregman onset-synchrony: at section boundaries, nudge stem currentTime
+    // by ±half the section's onsetOffsetMs. Vocals (i=0) stays anchored as the
+    // psychoacoustic reference; other stems alternate sign so they fan out.
+    if (idx !== this.lastSectionIdx) {
+      this.lastSectionIdx = idx;
+      const offsetMs = sec.onsetOffsetMs ?? 0;
+      this.stemNodes.forEach((node, i) => {
+        if (i === 0 || offsetMs === 0) return; // vocals stays anchored
+        const seekDelta = (offsetMs / 1000) * (i % 2 === 0 ? 1 : -1) * 0.5; // ±half the offset
+        try { node.audio.currentTime = Math.max(0, node.audio.currentTime + seekDelta); } catch {}
+      });
+    }
+
     // Onset detection on the analyser stream.
     if (this.analyser && this.timeBuf && this.freqBuf) {
       this.analyser.getByteTimeDomainData(this.timeBuf);
@@ -444,6 +565,7 @@ class ListeningEngine {
 export function Listening() {
   const setPhase = useStore((s) => s.setPhase);
   const sessionTrackUrl = useStore((s) => s.sessionTrackUrl);
+  const sessionStemUrls = useStore((s) => s.sessionStemUrls);
   const pairChoices = useStore((s) => s.pairChoices);
   const pairLatencies = useStore((s) => s.pairLatencies);
   const emotionTiles = useStore((s) => s.emotionTiles);
@@ -554,6 +676,7 @@ export function Listening() {
     }
     const engine = new ListeningEngine({
       url: playUrl,
+      stemUrls: sessionStemUrls,
       onArcEnd: () => setPhase(10),
       onOnset: handleOnset,
     });
