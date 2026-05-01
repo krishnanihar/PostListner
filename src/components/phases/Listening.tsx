@@ -61,21 +61,23 @@ interface Section {
   consistencyBroken: number;
   /** Delay between gesture and effect, in ms. 0 = immediate. 1000+ = decoupled. */
   priorityDelayMs: number;
+  /** 0 = clean. 1 = max chorus-style timbral blur via fast LFO on filter. */
+  timbralBlur: number;
 }
 
 const SECTIONS: Section[] = [
   // 0:00–1:00 — threshold. Conducting still works; orchestra introduces autonomous behaviors.
-  { key: 'threshold',  start:       0, end:  60_000, panDriftWidth: 0.3, panDriftPeriod: 18, filterHz: 8000, wetMix: 0.05, masterGain: 0.85, detuneCents:  0, exclusivityBroken: 0.15, consistencyBroken: 0.00, priorityDelayMs:    0 },
+  { key: 'threshold',  start:       0, end:  60_000, panDriftWidth: 0.3, panDriftPeriod: 18, filterHz: 8000, wetMix: 0.05, masterGain: 0.85, detuneCents:  0, exclusivityBroken: 0.15, consistencyBroken: 0.00, priorityDelayMs:    0, timbralBlur: 0.00 },
   // 1:00–2:30 — release. Onset offsets begin; common fate diverges; spatial widens.
-  { key: 'release',    start:  60_000, end: 150_000, panDriftWidth: 1.0, panDriftPeriod: 12, filterHz: 4500, wetMix: 0.30, masterGain: 0.90, detuneCents:  6, exclusivityBroken: 0.45, consistencyBroken: 0.30, priorityDelayMs:    0 },
+  { key: 'release',    start:  60_000, end: 150_000, panDriftWidth: 1.0, panDriftPeriod: 12, filterHz: 4500, wetMix: 0.30, masterGain: 0.90, detuneCents:  6, exclusivityBroken: 0.45, consistencyBroken: 0.30, priorityDelayMs:    0, timbralBlur: 0.15 },
   // 2:30–3:30 — peak. Bregman fully degraded; Wegner priority broken; ego-loosening peak.
-  { key: 'peak',       start: 150_000, end: 210_000, panDriftWidth: 1.5, panDriftPeriod:  9, filterHz: 1500, wetMix: 0.70, masterGain: 0.92, detuneCents: 22, exclusivityBroken: 0.85, consistencyBroken: 0.85, priorityDelayMs: 1200 },
+  { key: 'peak',       start: 150_000, end: 210_000, panDriftWidth: 1.5, panDriftPeriod:  9, filterHz: 1500, wetMix: 0.70, masterGain: 0.92, detuneCents: 22, exclusivityBroken: 0.85, consistencyBroken: 0.85, priorityDelayMs: 1200, timbralBlur: 0.55 },
   // 3:30–4:30 — return. Inverse Bregman; agency briefly reappears as a gift.
-  { key: 'return',     start: 210_000, end: 270_000, panDriftWidth: 0.6, panDriftPeriod: 11, filterHz: 3500, wetMix: 0.40, masterGain: 0.93, detuneCents:  8, exclusivityBroken: 0.50, consistencyBroken: 0.40, priorityDelayMs:  600 },
+  { key: 'return',     start: 210_000, end: 270_000, panDriftWidth: 0.6, panDriftPeriod: 11, filterHz: 3500, wetMix: 0.40, masterGain: 0.93, detuneCents:  8, exclusivityBroken: 0.50, consistencyBroken: 0.40, priorityDelayMs:  600, timbralBlur: 0.20 },
   // 4:30–5:30 — homecoming. Plagal warmth; gesture re-engages briefly.
-  { key: 'homecoming', start: 270_000, end: 330_000, panDriftWidth: 0.2, panDriftPeriod: 14, filterHz: 6500, wetMix: 0.18, masterGain: 0.90, detuneCents:  0, exclusivityBroken: 0.10, consistencyBroken: 0.05, priorityDelayMs:    0 },
+  { key: 'homecoming', start: 270_000, end: 330_000, panDriftWidth: 0.2, panDriftPeriod: 14, filterHz: 6500, wetMix: 0.18, masterGain: 0.90, detuneCents:  0, exclusivityBroken: 0.10, consistencyBroken: 0.05, priorityDelayMs:    0, timbralBlur: 0.05 },
   // 5:30–6:00 — silence. Master ramps to 0; advance phase 10.
-  { key: 'silence',    start: 330_000, end: 360_000, panDriftWidth: 0.0, panDriftPeriod: 14, filterHz: 5000, wetMix: 0.10, masterGain: 0.00, detuneCents:  0, exclusivityBroken: 0.00, consistencyBroken: 0.00, priorityDelayMs:    0 },
+  { key: 'silence',    start: 330_000, end: 360_000, panDriftWidth: 0.0, panDriftPeriod: 14, filterHz: 5000, wetMix: 0.10, masterGain: 0.00, detuneCents:  0, exclusivityBroken: 0.00, consistencyBroken: 0.00, priorityDelayMs:    0, timbralBlur: 0.00 },
 ];
 const ARC_TOTAL_MS = SECTIONS[SECTIONS.length - 1].end;
 
@@ -370,9 +372,11 @@ class ListeningEngine {
 
     // Gesture deltas, bounded so the section's macro shape always reads.
     const panFinal = Math.max(-2, Math.min(2, panBase + effectiveRoll * 1.2 * gestureWeight + autonomousPan));
+    const blendedBlur = lerpSec(sec.timbralBlur, next.timbralBlur);
+    const blurLfo = Math.sin((elapsed / 1000 * 7) * Math.PI * 2) * blendedBlur * 0.4; // ±0.4 octave at peak
     const filterFinal = Math.max(
       400,
-      Math.min(14000, baseFilter * Math.pow(2, effectivePitch * 1.0))
+      Math.min(14000, baseFilter * Math.pow(2, effectivePitch * 1.0 + blurLfo))
     );
     const masterFinal = Math.max(0, Math.min(1.05, baseMaster + this.gAccel * 0.08));
 
