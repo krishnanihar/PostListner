@@ -45,13 +45,25 @@ export function Reflection() {
   const [visible, setVisible] = useState(0);
 
   useEffect(() => {
+    // `cancelled` defends against the (rare) case where the dependencies
+    // change while still mounted: clearTimeout would normally suffice, but
+    // a callback already in the microtask queue could still resurrect a
+    // stale `visible` index on top of newer state.
+    let cancelled = false;
     const timers: number[] = [];
     lines.forEach((_, i) => {
-      timers.push(window.setTimeout(() => setVisible(i + 1), HEAD_DELAY_MS + i * LINE_INTERVAL_MS));
+      timers.push(window.setTimeout(() => {
+        if (!cancelled) setVisible(i + 1);
+      }, HEAD_DELAY_MS + i * LINE_INTERVAL_MS));
     });
     const totalLineTime = HEAD_DELAY_MS + lines.length * LINE_INTERVAL_MS;
-    timers.push(window.setTimeout(() => setPhase(MIRROR_PHASE), totalLineTime + FINAL_HOLD_MS));
-    return () => timers.forEach(clearTimeout);
+    timers.push(window.setTimeout(() => {
+      if (!cancelled) setPhase(MIRROR_PHASE);
+    }, totalLineTime + FINAL_HOLD_MS));
+    return () => {
+      cancelled = true;
+      timers.forEach(clearTimeout);
+    };
   }, [lines.length, setPhase]);
 
   const headerName = userName ? `here is what i heard, ${userName.toLowerCase()}` : 'here is what i heard';

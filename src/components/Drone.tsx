@@ -30,6 +30,7 @@ export function Drone({
   const ctxRef = useRef<AudioContext | null>(null);
   const oscRef = useRef<OscillatorNode | null>(null);
   const gainRef = useRef<GainNode | null>(null);
+  const closeTimerRef = useRef<number | null>(null);
 
   useEffect(() => {
     type AC = typeof AudioContext;
@@ -70,7 +71,11 @@ export function Drone({
         g.gain.setValueAtTime(g.gain.value, ctx.currentTime);
         g.gain.linearRampToValueAtTime(0, ctx.currentTime + fadeSec);
         osc.stop(ctx.currentTime + fadeSec + 0.05);
-        window.setTimeout(() => {
+        // Track the close timer so a rapid remount (StrictMode in dev,
+        // or fast phase navigation) can cancel a pending close before it
+        // fires on a context that's already been replaced.
+        closeTimerRef.current = window.setTimeout(() => {
+          closeTimerRef.current = null;
           ctx.close().catch(() => {});
         }, fadeOutMs + 100);
       } catch {
@@ -78,6 +83,18 @@ export function Drone({
       }
     };
   }, [freq, gain, fadeInMs, fadeOutMs]);
+
+  // Final unmount: cancel any pending close timer and best-effort close.
+  // The effect above runs its cleanup before this on rapid remount, but a
+  // genuine unmount of the parent should still tear everything down.
+  useEffect(() => {
+    return () => {
+      if (closeTimerRef.current != null) {
+        window.clearTimeout(closeTimerRef.current);
+        closeTimerRef.current = null;
+      }
+    };
+  }, []);
 
   return null;
 }

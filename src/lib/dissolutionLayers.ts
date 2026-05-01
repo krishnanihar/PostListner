@@ -120,10 +120,21 @@ export class DissolutionLayers {
       }
     } catch {}
     window.setTimeout(() => {
+      // Stop oscillators, then disconnect every node so the audio graph
+      // doesn't retain references after the engine is torn down.
       try { this.droneOsc?.stop(); } catch {}
       try { this.binauralLeftOsc?.stop(); } catch {}
       try { this.binauralRightOsc?.stop(); } catch {}
       try { this.water?.pause(); } catch {}
+      try { this.droneOsc?.disconnect(); } catch {}
+      try { this.binauralLeftOsc?.disconnect(); } catch {}
+      try { this.binauralRightOsc?.disconnect(); } catch {}
+      try { this.droneGain?.disconnect(); } catch {}
+      try { this.binauralLeftGain?.disconnect(); } catch {}
+      try { this.binauralRightGain?.disconnect(); } catch {}
+      try { this.binauralMerger?.disconnect(); } catch {}
+      try { this.waterGain?.disconnect(); } catch {}
+      try { this.masterGain?.disconnect(); } catch {}
     }, 600);
   }
 }

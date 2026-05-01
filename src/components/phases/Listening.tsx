@@ -135,6 +135,34 @@ interface EngineOpts {
   gentlePath?: boolean;
   onArcEnd: () => void;
   onOnset: (stemIdx: number) => void;
+  /**
+   * Pre-primed AudioContext from the click handler. iOS Safari requires
+   * AudioContext.resume() to ride the user-gesture token, so the React
+   * component creates the ctx synchronously in `begin()` before any awaits
+   * and hands it in here.
+   */
+  ctx?: AudioContext | null;
+}
+
+/**
+ * Create + resume an AudioContext synchronously on a user gesture. iOS Safari
+ * burns the gesture token across `await`, so callers must invoke this from
+ * the click handler before any `await`. Returns null on browsers without
+ * Web Audio (the engine then no-ops).
+ */
+function primeAudioContext(): AudioContext | null {
+  type AC = typeof AudioContext;
+  const Ctx: AC | undefined =
+    typeof window !== 'undefined'
+      ? window.AudioContext ??
+        (window as unknown as { webkitAudioContext?: AC }).webkitAudioContext
+      : undefined;
+  if (!Ctx) return null;
+  const ctx = new Ctx();
+  // Fire-and-forget — resume() is async but we don't need to await it; the
+  // gesture authorization travels with the call itself, not the promise.
+  if (ctx.state === 'suspended') ctx.resume().catch(() => {});
+  return ctx;
 }
 
 /** All Web Audio + gesture state lives in this engine. React owns its lifecycle. */
@@ -205,13 +233,13 @@ class ListeningEngine {
 
   async start() {
     if (this.running) return;
-    type AC = typeof AudioContext;
-    const Ctx: AC | undefined =
-      window.AudioContext ??
-      (window as unknown as { webkitAudioContext?: AC }).webkitAudioContext;
-    if (!Ctx) return;
-
-    const ctx = new Ctx();
+    // Prefer the pre-primed context handed in from the click handler; only
+    // construct one ourselves as a desktop / non-iOS fallback. Either way,
+    // resume() is best-effort — iOS will silently fail to resume if no
+    // gesture token is alive.
+    let ctx = this.opts.ctx ?? null;
+    if (!ctx) ctx = primeAudioContext();
+    if (!ctx) return;
     if (ctx.state === 'suspended') await ctx.resume().catch(() => {});
 
     const convolver = ctx.createConvolver();
@@ -660,6 +688,19 @@ export function Listening() {
   const [section, setSection] = useState(0);
   const [taps, setTaps] = useState<{ stem: number; x: number; bornAt: number }[]>([]);
   const tapsBornRef = useRef(0);
+  // Honor `prefers-reduced-motion`: such users get the softened peak even
+  // if they didn't flag a screening item. Phase 9's continuous spatial
+  // drift + detune is hostile to vestibular sensitivity.
+  const [reducedMotion, setReducedMotion] = useState(false);
+  useEffect(() => {
+    if (typeof window === 'undefined' || !window.matchMedia) return;
+    const mq = window.matchMedia('(prefers-reduced-motion: reduce)');
+    setReducedMotion(mq.matches);
+    const onChange = (e: MediaQueryListEvent) => setReducedMotion(e.matches);
+    mq.addEventListener?.('change', onChange);
+    return () => mq.removeEventListener?.('change', onChange);
+  }, []);
+  const effectiveGentlePath = gentlePath || reducedMotion;
 
   // Detect if we'll need to ask iOS for motion permission. The class on
   // DeviceOrientationEvent is iOS Safari-specific.
@@ -700,15 +741,29 @@ export function Listening() {
   }, [started]);
 
   // Engine lifecycle. Created on user gesture (begin), destroyed on unmount.
+  // Revocation defers ~1.1s after stop() so the engine's fade-out doesn't
+  // tear down its source while the HTMLAudioElement is still reading from
+  // the blob (engine.stop() schedules a 0.4s ramp + 0.6s ctx.close timer).
   useEffect(() => {
     return () => {
       engineRef.current?.stop();
       engineRef.current = null;
-      // Revoke the blob URL we created in Wait (if any).
-      if (sessionTrackUrl && sessionTrackUrl.startsWith('blob:')) {
-        try { URL.revokeObjectURL(sessionTrackUrl); } catch {}
-      }
+      const trackUrl = sessionTrackUrl;
+      const stems = sessionStemUrls;
+      window.setTimeout(() => {
+        if (trackUrl && trackUrl.startsWith('blob:')) {
+          try { URL.revokeObjectURL(trackUrl); } catch {}
+        }
+        if (stems) {
+          for (const u of [stems.vocals, stems.drums, stems.bass, stems.other]) {
+            try { URL.revokeObjectURL(u); } catch {}
+          }
+        }
+      }, 1100);
     };
+    // sessionStemUrls intentionally omitted — captured by closure above; we
+    // only need to re-arm if the underlying playable URL changes.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionTrackUrl]);
 
   const handleOnset = (stemIdx: number) => {
@@ -730,22 +785,29 @@ export function Listening() {
       setPhase(10);
       return;
     }
-    // Ask iOS for motion permission if applicable. Failure is fine — the
-    // pointer fallback covers desktop and denied-permission cases.
+    // CRITICAL: iOS Safari only allows AudioContext.resume() and
+    // requestPermission() during a user gesture. Both must happen before
+    // any `await`, since the gesture token is consumed across the
+    // microtask boundary. Prime the context first (synchronous), kick the
+    // permission requests (which don't need to be awaited to start), then
+    // hand the warmed context to the engine.
+    const ctx = primeAudioContext();
     if (needsIosPerm) {
-      try {
-        const w = window as unknown as {
-          DeviceOrientationEvent?: { requestPermission?: () => Promise<string> };
-          DeviceMotionEvent?: { requestPermission?: () => Promise<string> };
-        };
-        await w.DeviceOrientationEvent?.requestPermission?.().catch(() => null);
-        await w.DeviceMotionEvent?.requestPermission?.().catch(() => null);
-      } catch {}
+      const w = window as unknown as {
+        DeviceOrientationEvent?: { requestPermission?: () => Promise<string> };
+        DeviceMotionEvent?: { requestPermission?: () => Promise<string> };
+      };
+      // Fire both — failures are fine; pointer fallback covers denial.
+      // Use `?.catch` so an absent requestPermission (i.e., `?.()` returning
+      // undefined) doesn't throw a TypeError before the catch handler attaches.
+      w.DeviceOrientationEvent?.requestPermission?.()?.catch(() => null);
+      w.DeviceMotionEvent?.requestPermission?.()?.catch(() => null);
     }
     const engine = new ListeningEngine({
       url: playUrl,
       stemUrls: sessionStemUrls,
-      gentlePath,
+      gentlePath: effectiveGentlePath,
+      ctx,
       onArcEnd: () => setPhase(10),
       onOnset: handleOnset,
     });

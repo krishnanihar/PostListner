@@ -44,12 +44,21 @@ export function Moment() {
     });
   }, [provisional, pairChoices, pairLatencies, songYears, tapBPM, emotionTiles]);
 
-  const sessionStart = useRef(performance.now());
   const [, force] = useState(0);
   const [pulse, setPulse] = useState<{ x: number; y: number; id: number } | null>(null);
   const [tapping, setTapping] = useState(false);
   const pulseIdRef = useRef(0);
   const tappingTimeoutRef = useRef<number | null>(null);
+  const advanceTimerRef = useRef<number | null>(null);
+
+  // Cancel pending timers on unmount so a stray advance doesn't fire after
+  // the user has already navigated to a different phase.
+  useEffect(() => {
+    return () => {
+      if (tappingTimeoutRef.current) window.clearTimeout(tappingTimeoutRef.current);
+      if (advanceTimerRef.current) window.clearTimeout(advanceTimerRef.current);
+    };
+  }, []);
 
   // place tap dots evenly across the stave so the rhythm reads
   const tapDots = tapTimes.map((_, i) => {
@@ -94,7 +103,11 @@ export function Moment() {
 
   const onLikingClick = (value: number) => {
     setLiking(value);
-    setTimeout(() => setPhase(5), 700);
+    if (advanceTimerRef.current) window.clearTimeout(advanceTimerRef.current);
+    advanceTimerRef.current = window.setTimeout(() => {
+      advanceTimerRef.current = null;
+      setPhase(5);
+    }, 700);
   };
 
   const tactusFrequency = tapBPM ? Math.max(2, Math.min(10, tapBPM / 18)) : 4;

@@ -102,7 +102,9 @@ export function Wait() {
     // variation — guaranteed to exist for all 24 variations.
     const fallbackUrl = `/audio/audition/${sel.variation.id}.mp3`;
 
+    let cancelled = false;
     const useFallback = (status: 'fallback' | 'error') => {
+      if (cancelled) return;
       setSessionTrack(fallbackUrl, title, status);
       setAudioReadyAt(performance.now());
     };
@@ -113,8 +115,9 @@ export function Wait() {
       return;
     }
 
-    const ctrl = new AbortController();
-    const timeout = window.setTimeout(() => ctrl.abort(), GEN_TIMEOUT_MS);
+    const composeCtrl = new AbortController();
+    const stemsCtrl = new AbortController();
+    const timeout = window.setTimeout(() => composeCtrl.abort(), GEN_TIMEOUT_MS);
 
     (async () => {
       try {
@@ -132,27 +135,42 @@ export function Wait() {
             compositionPlan: plan,
             bucket: 'session',
           }),
-          signal: ctrl.signal,
+          signal: composeCtrl.signal,
         });
+        if (cancelled) return;
         if (!res.ok) {
           useFallback(res.status === 404 ? 'fallback' : 'error');
           return;
         }
         const blob = await res.blob();
+        if (cancelled) return;
         const url = URL.createObjectURL(blob);
         setSessionTrack(url, title, 'ready');
         // Background-stream stems unzip — do NOT block the ritual on this.
         // Listening will fall back to single-source onsets if stems aren't
-        // ready by the time Reveal hands off.
+        // ready by the time Reveal hands off. Wired to its own AbortController
+        // so unmounting Wait while stems are in flight discards the result
+        // instead of writing to a (possibly already-reset) store.
         fetch('/api/stems', {
           method: 'POST',
           headers: { 'Content-Type': 'audio/mpeg' },
           body: blob,
+          signal: stemsCtrl.signal,
         })
           .then(async (sr) => {
-            if (!sr.ok) return;
+            if (cancelled || !sr.ok) return;
             const zipBuf = await sr.arrayBuffer();
+            if (cancelled) return;
             const stems = await unzipStems(zipBuf);
+            if (cancelled) {
+              if (stems) {
+                URL.revokeObjectURL(stems.vocals);
+                URL.revokeObjectURL(stems.drums);
+                URL.revokeObjectURL(stems.bass);
+                URL.revokeObjectURL(stems.other);
+              }
+              return;
+            }
             if (stems) useStore.getState().setSessionStems(stems);
           })
           .catch(() => {});
@@ -165,8 +183,10 @@ export function Wait() {
     })();
 
     return () => {
+      cancelled = true;
       window.clearTimeout(timeout);
-      ctrl.abort();
+      composeCtrl.abort();
+      stemsCtrl.abort();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

@@ -76,19 +76,24 @@ export function Mirror() {
   );
 
   useEffect(() => {
+    let cancelled = false;
+    const guard = (n: number) => () => { if (!cancelled) setStage(n); };
     const timers = [
-      setTimeout(() => setStage(1), STAGE_T.name),
-      setTimeout(() => setStage(2), STAGE_T.variation),
-      setTimeout(() => setStage(3), STAGE_T.forer1),
-      setTimeout(() => setStage(4), STAGE_T.forer2),
-      setTimeout(() => setStage(5), STAGE_T.forer3),
-      setTimeout(() => setStage(6), STAGE_T.forer4),
-      setTimeout(() => setStage(7), STAGE_T.forer5),
-      setTimeout(() => setStage(8), STAGE_T.memory),
-      setTimeout(() => setStage(9), STAGE_T.handoff),
-      setTimeout(() => setPhase(7), STAGE_T.next),
+      setTimeout(guard(1), STAGE_T.name),
+      setTimeout(guard(2), STAGE_T.variation),
+      setTimeout(guard(3), STAGE_T.forer1),
+      setTimeout(guard(4), STAGE_T.forer2),
+      setTimeout(guard(5), STAGE_T.forer3),
+      setTimeout(guard(6), STAGE_T.forer4),
+      setTimeout(guard(7), STAGE_T.forer5),
+      setTimeout(guard(8), STAGE_T.memory),
+      setTimeout(guard(9), STAGE_T.handoff),
+      setTimeout(() => { if (!cancelled) setPhase(7); }, STAGE_T.next),
     ];
-    return () => timers.forEach(clearTimeout);
+    return () => {
+      cancelled = true;
+      timers.forEach(clearTimeout);
+    };
   }, [setPhase, STAGE_T]);
 
   return (
