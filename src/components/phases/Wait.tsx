@@ -27,11 +27,12 @@ const ACTS = [
 ];
 
 // Minimum time act i must hold even if generation returns instantly. The
-// ritual needs duration; without it the act flashes by. ~25s is short enough
-// that a slow generation finishes inside it most of the time.
-const ACT0_MIN_MS = 25_000;
+// ritual needs duration; without it the act flashes by. Real composition_plan
+// generations take ~60–120s, so 60s covers most live generations and keeps
+// the title from appearing before the audio is ready.
+const ACT0_MIN_MS = 60_000;
 // Time act ii holds once the audio is acquired (buffer + presence).
-const ACT1_HOLD_MS = 14_000;
+const ACT1_HOLD_MS = 18_000;
 // The honored silence between act iii and Reveal — Bregman gap before the
 // first heard note (Research/wait-as-ritual §incorporation).
 const ACT2_SILENCE_MS = 4_500;
