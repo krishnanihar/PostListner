@@ -140,7 +140,37 @@ async function runWithConcurrency<T>(
   return results;
 }
 
+/**
+ * Constant-time string compare to avoid timing-side-channel leaks on the
+ * admin token. A length mismatch returns false immediately; otherwise we OR
+ * differing bytes across the full length so we always do the same work.
+ */
+function safeEqual(a: string, b: string): boolean {
+  if (a.length !== b.length) return false;
+  let diff = 0;
+  for (let i = 0; i < a.length; i++) diff |= a.charCodeAt(i) ^ b.charCodeAt(i);
+  return diff === 0;
+}
+
 export async function POST(req: NextRequest) {
+  // Auth gate — this endpoint can spend money via ElevenLabs. Require a
+  // bearer token from env. If ADMIN_TOKEN is unset we fail closed in
+  // production and only allow access when explicitly running offline (the
+  // dryRun path is still useful in dev without a token, see below).
+  const adminToken = process.env.ADMIN_TOKEN;
+  const auth = req.headers.get('authorization') ?? '';
+  const presented = auth.startsWith('Bearer ') ? auth.slice(7) : '';
+  const authorized = !!adminToken && !!presented && safeEqual(presented, adminToken);
+  if (!authorized) {
+    if (!adminToken) {
+      return NextResponse.json(
+        { error: 'ADMIN_TOKEN not set on server — admin endpoint is disabled' },
+        { status: 503 }
+      );
+    }
+    return NextResponse.json({ error: 'unauthorized' }, { status: 401 });
+  }
+
   const apiKey = process.env.ELEVENLABS_API_KEY;
   if (!apiKey) {
     return NextResponse.json({ error: 'ELEVENLABS_API_KEY not set' }, { status: 500 });

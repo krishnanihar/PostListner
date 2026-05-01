@@ -58,7 +58,14 @@ export async function POST(req: NextRequest) {
   const compositionPlan = body.compositionPlan;
   const lengthMs = body.lengthMs ?? 30000;
   const bucket = body.bucket ?? 'session';
-  const cacheKey = body.key;
+  const rawCacheKey = body.key;
+  // Cache key flows into a filesystem path — restrict to a safe alphabet so
+  // `../` and friends can't escape the bucket directory.
+  const SAFE_KEY = /^[a-zA-Z0-9_-]{1,64}$/;
+  if (rawCacheKey != null && !SAFE_KEY.test(rawCacheKey)) {
+    return NextResponse.json({ error: 'invalid key' }, { status: 400 });
+  }
+  const cacheKey = rawCacheKey;
 
   // Exactly one of prompt / compositionPlan — ElevenLabs rejects both-set, and
   // we'd have nothing to send if neither is set.

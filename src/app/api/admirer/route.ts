@@ -57,6 +57,11 @@ export async function POST(req: NextRequest) {
   // Cache check.
   await mkdir(CACHE_DIR, { recursive: true });
   const key = admirerCacheKey(text, register);
+  // admirerCacheKey() returns base36 from DJB2, but validate defensively
+  // before trusting it as a path component.
+  if (!/^[a-z0-9]{1,32}$/.test(key)) {
+    return NextResponse.json({ error: 'invalid cache key' }, { status: 500 });
+  }
   const cachePath = join(CACHE_DIR, `${key}.mp3`);
   if (existsSync(cachePath)) {
     return new NextResponse(createReadStream(cachePath) as unknown as ReadableStream, {
