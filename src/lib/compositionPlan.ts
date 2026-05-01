@@ -5,6 +5,7 @@
  * flagged) and keeps timbre / production / era / emotion descriptors.
  */
 import type { Archetype, Variation } from '@/types';
+import { ARCHETYPES } from '@/data/archetypes';
 
 export interface CompositionSection {
   section_name: string;
@@ -43,8 +44,26 @@ const SECTION_STYLE_BIAS: Record<string, { positive: string[]; negative: string[
   silence:     { positive: ['fading', 'sustained tone', 'distant'],        negative: ['active', 'percussive'] },
 };
 
-/** ElevenLabs music moderator flags some terms — strip them and keep musical descriptors. */
-const BANNED_PATTERNS = [/\bvelvet\s+mystic\b/i, /\bsky[\s-]seeker\b/i, /\bquiet\s+insurgent\b/i];
+/** Escape a string so it can be safely interpolated into a RegExp literal. */
+function escapeRegExp(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+/**
+ * ElevenLabs music moderator flags some terms — most often the literary
+ * archetype names ("Velvet Mystic", "Sky-Seeker", "Quiet Insurgent"). Build
+ * the blocklist from ARCHETYPES.name so renames don't leave dead patterns
+ * behind. We strip a leading "The " (moderator hits the noun phrase, not the
+ * article), then build a regex that tolerates space ↔ hyphen variants.
+ */
+const BANNED_PATTERNS: RegExp[] = ARCHETYPES.map((a) => {
+  const core = a.name.replace(/^The\s+/i, '');
+  // Tokenize on whitespace and rejoin with `[\s-]+` so "Velvet Mystic",
+  // "Velvet-Mystic", and "Velvet  Mystic" all match.
+  const tokens = core.split(/\s+/).map(escapeRegExp);
+  return new RegExp(`\\b${tokens.join('[\\s-]+')}\\b`, 'i');
+});
+
 function sanitize(s: string): string {
   let out = s;
   for (const re of BANNED_PATTERNS) out = out.replace(re, '').trim();
@@ -93,29 +112,26 @@ export function buildCompositionPlan(opts: {
     .map(sanitize)
     .filter(Boolean);
 
-  const positive_global_styles = [
-    ...variationDescriptors,
-    ...archetypeDescriptors,
-    'felt-personalization',
-    'instrumental',
-  ].slice(0, 8);
+  // AVD bias terms first, so they survive the 8-style cap. Two pillars of the
+  // prompt — `felt-personalization` + `instrumental` — also get reserved slots.
+  // Whatever space remains is filled by variation + archetype descriptors.
+  const avdBias: string[] = [];
+  if (avd) {
+    const [arousal, valence, depth] = avd;
+    if (arousal > 0.6) avdBias.push('alive');
+    if (depth > 0.6) avdBias.push('harmonically rich');
+    if (valence < 0.4) avdBias.push('bittersweet');
+  }
+  const reserved: string[] = [...avdBias, 'felt-personalization', 'instrumental'];
+  const remaining = Math.max(0, 8 - reserved.length);
+  const descriptorPool = [...variationDescriptors, ...archetypeDescriptors];
+  const cappedGlobals = [...descriptorPool.slice(0, remaining), ...reserved];
 
   const negative_global_styles = [
     'aggressive',
     'distorted',
     'shouting vocals',
   ];
-
-  // AVD bias: tuple [arousal, valence, depth]. Keep the bias gentle — the
-  // variation tag already carries most of the signal. Slice() afterward so the
-  // global styles cap remains at 8.
-  if (avd) {
-    const [arousal, valence, depth] = avd;
-    if (arousal > 0.6) positive_global_styles.push('alive');
-    if (depth > 0.6) positive_global_styles.push('harmonically rich');
-    if (valence < 0.4) positive_global_styles.push('bittersweet');
-  }
-  const cappedGlobals = positive_global_styles.slice(0, 8);
 
   const sections: CompositionSection[] = SECTION_NAMES.map((name, i) => {
     const bias = SECTION_STYLE_BIAS[name];

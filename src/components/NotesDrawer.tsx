@@ -34,17 +34,17 @@ export function NotesDrawer() {
         title="Design notes & research citations"
         aria-label="Toggle design notes"
       >
-        𝓘
+        notes
       </button>
 
-      <aside className={`notes-drawer${open ? ' open' : ''}`}>
+      <aside className={`notes-drawer${open ? ' open' : ''}`} aria-hidden={!open}>
         <button
           type="button"
           className="notes-close"
           onClick={() => setOpen(false)}
           aria-label="Close notes"
         >
-          ×
+          close
         </button>
 
         {note && (

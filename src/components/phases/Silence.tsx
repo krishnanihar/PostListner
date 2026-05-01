@@ -117,7 +117,7 @@ export function Silence() {
         {stage === 'artifact' && selection && (
           <>
             <p style={textStyle(13, 0.8)}>your name for this hour</p>
-            <h2 style={{ ...textStyle(28), margin: 0 }}>{selection.archetype.name}</h2>
+            <h1 style={{ ...textStyle(28), margin: 0, fontWeight: 400 }}>{selection.archetype.name}</h1>
             <p style={{ ...textStyle(12, 0.7), margin: 0, fontFamily: FONTS.mono, letterSpacing: '0.2em' }}>{selection.variation.tag}</p>
             <button onClick={onTakeHome} style={btnStyle()}>TAKE THIS WITH YOU</button>
           </>

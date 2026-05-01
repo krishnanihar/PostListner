@@ -1,6 +1,9 @@
 import type { WaveShape } from '@/types';
 
 export function wfHeight(shape: WaveShape, i: number, n: number): number {
+  // Callers pass `n` as a sample count. Empty waveforms (n <= 0) would
+  // produce NaN via division — return a neutral baseline instead.
+  if (n <= 0) return 30;
   const t = i / n;
   switch (shape) {
     case 'low':     return 20 + 50 * Math.sin(t * Math.PI * 2) * Math.exp(-t * 0.6);

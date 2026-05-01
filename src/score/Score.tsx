@@ -120,6 +120,33 @@ export function Score({
           </text>
         )}
       </svg>
+      {/*
+        Screen-reader shadow for the live voice cue. SVG <text> is not
+        announced by most assistive tech, so we mirror the cue text into a
+        visually-hidden polite live region. Each phase change updates the
+        cue, and the cue carries instructional content (e.g. "hold the
+        phone like a baton") that a non-sighted listener would otherwise
+        miss.
+      */}
+      {voiceCue && (
+        <div
+          role="status"
+          aria-live="polite"
+          style={{
+            position: 'absolute',
+            width: 1,
+            height: 1,
+            padding: 0,
+            margin: -1,
+            overflow: 'hidden',
+            clip: 'rect(0,0,0,0)',
+            whiteSpace: 'nowrap',
+            border: 0,
+          }}
+        >
+          {voiceCue}
+        </div>
+      )}
       {overlay && <div className="overlay">{overlay}</div>}
     </Paper>
   );

@@ -180,9 +180,10 @@ body[data-paper="dark"]::after {
   border: none;
   color: var(--ink-secondary);
   cursor: pointer;
-  font-family: var(--font-serif);
-  font-style: italic;
-  font-size: 14px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
   z-index: 60;
   transition: color 0.3s;
   padding: 6px;
@@ -212,9 +213,12 @@ body[data-paper="dark"]::after {
   background: transparent;
   border: none;
   color: var(--ink-secondary);
-  font-family: var(--font-serif);
-  font-size: 18px;
+  font-family: var(--font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
   cursor: pointer;
+  padding: 4px 6px;
 }
 .notes-close:hover { color: var(--score-amber); }
 
@@ -362,6 +366,23 @@ body[data-paper="dark"]::after {
 @keyframes tapPulse {
   0%   { opacity: 0.85; transform: scale(1); }
   100% { opacity: 0;    transform: scale(9); }
+}
+
+/*
+ * Reduced-motion: a felt-personalization rite includes induced agency-loss
+ * and continuous spatial drift in Phase 9, which is hostile to vestibular
+ * disorders / motion-sensitive users. Honor the OS preference: stop infinite
+ * loops, instantize transitions, and let phases that gate on motion fall
+ * back to instant fades. Phase 9's gestural/dissolution arc additionally
+ * routes such users into `gentlePath` from JS (see Listening + Welcome).
+ */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }
 
 /* — common HTML overlays for phases — */

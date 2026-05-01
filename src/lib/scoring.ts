@@ -20,14 +20,20 @@ export function computeAVD(
   pairChoices: (Side | undefined)[],
   pairLatencies: (number | undefined)[]
 ): AVDResult {
-  const rts = pairLatencies.filter((x): x is number => !!x).map((x) => Math.log(x));
+  // log() requires strictly positive latencies. Synthetic / dev fixtures may
+  // hand us 0 or negative values; filter to positive only so the z-score
+  // calculation never sees -Infinity. NaN-poisoning here cascaded silently
+  // into a default-1.0 weight before, which only worked by accident.
+  const rts = pairLatencies
+    .filter((x): x is number => Number.isFinite(x) && (x as number) > 0)
+    .map((x) => Math.log(x));
   const mean = rts.length ? rts.reduce((a, b) => a + b, 0) / rts.length : 0;
   const sd = rts.length
     ? Math.sqrt(rts.reduce((s, x) => s + (x - mean) ** 2, 0) / rts.length)
     : 1;
 
   const confWeight = (latency?: number): number => {
-    if (!latency) return 1;
+    if (!latency || !Number.isFinite(latency) || latency <= 0) return 1;
     const z = (Math.log(latency) - mean) / (sd || 1);
     if (z > 1.5) return 0.4;
     if (z > 0.5) return 0.7;
@@ -220,7 +226,13 @@ export function getLatencyLine(pairLatencies: (number | undefined)[]): string | 
   const rts = pairLatencies.filter((x): x is number => !!x);
   if (rts.length < 3) return null;
   const sorted = [...rts].sort((a, b) => a - b);
-  const median = sorted[Math.floor(sorted.length / 2)];
+  // Even-length arrays: average the two middle samples so the median doesn't
+  // bias toward the upper sample. Matters at the boundary between
+  // "deliberation" (>3.5s) and "decisive" (<1.5s) phrasing.
+  const mid = sorted.length / 2;
+  const median = sorted.length % 2 === 0
+    ? (sorted[mid - 1] + sorted[mid]) / 2
+    : sorted[Math.floor(mid)];
   if (median > 3500) return 'You took your time. That is what I needed from you.';
   if (median < 1500) return 'You knew what you wanted. That helped.';
   return null;
