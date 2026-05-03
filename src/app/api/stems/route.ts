@@ -15,6 +15,10 @@ import { isOfflineMode } from '@/lib/env';
 export const runtime = 'nodejs';
 export const maxDuration = 360; // 6 minutes — htdemucs is slow on CPU.
 
+// Sidecar deactivated: Phase 9 uses the single-source fallback in Listening.
+// Flip to true and run the services/demucs container to re-enable.
+const STEMS_ENABLED = false;
+
 const DEMUCS_URL = process.env.DEMUCS_URL ?? 'http://localhost:8001';
 // Mirror the demucs sidecar's MAX_UPLOAD_BYTES so the Next.js layer fails
 // fast instead of buffering a 1GB upload into memory and then having the
@@ -22,6 +26,9 @@ const DEMUCS_URL = process.env.DEMUCS_URL ?? 'http://localhost:8001';
 const MAX_UPLOAD_BYTES = 100 * 1024 * 1024;
 
 export async function POST(req: NextRequest) {
+  if (!STEMS_ENABLED) {
+    return new Response('stems disabled', { status: 503 });
+  }
   if (isOfflineMode()) {
     return new Response('offline', { status: 503 });
   }
