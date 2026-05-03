@@ -5,9 +5,25 @@ import { Score, MARGIN_X, VB_W } from '@/score/Score';
 import { BreathPacer } from '@/score/BreathPacer';
 import { COLORS, FONTS } from '@/score/tokens';
 import { useStore } from '@/lib/store';
-import { resolveSelection, computeAVD } from '@/lib/scoring';
-import { buildCompositionPlan } from '@/lib/compositionPlan';
-import { isOfflineMode } from '@/lib/env';
+import { resolveSelection } from '@/lib/scoring';
+
+/**
+ * Demo: Phase 9 always plays this hand-baked 6-min track + 4 demucs stems.
+ * The rite's selection still drives Mirror's archetype paragraphs upstream;
+ * this only overrides the audio source for Wait/Reveal/Listening so the
+ * deploy doesn't depend on a live ElevenLabs+demucs pipeline.
+ *
+ * To restore the original live composition flow, you'll need to bring back
+ * the deleted pieces (see CLAUDE.md "Demo mode — temporary"):
+ *   - src/app/api/compose/route.ts
+ *   - src/lib/compositionPlan.ts
+ *   - the live-fetch useEffect logic in this file (git history)
+ * Re-generate the source mp3 with `node scripts/generate-demo-track.mjs`.
+ */
+const DEMO_TRACK = {
+  id: 'late_night_2020s_neoclassical',
+  tag: '2020s · neo-classical for the hours after',
+} as const;
 
 /**
  * Phase 7 — Composing. Three-act ritual wait per Research/wait-as-ritual:
@@ -36,12 +52,10 @@ const ACT1_HOLD_MS = 18_000;
 // The honored silence between act iii and Reveal — Bregman gap before the
 // first heard note (Research/wait-as-ritual §incorporation).
 const ACT2_SILENCE_MS = 4_500;
-// Hard cap on a live generation request — abort and fall back if exceeded.
-const GEN_TIMEOUT_MS = 240_000; // 4 min ceiling for a 6-min composition_plan.
-
 export function Wait() {
   const setPhase = useStore((s) => s.setPhase);
   const setSessionTrack = useStore((s) => s.setSessionTrack);
+  const setSessionStems = useStore((s) => s.setSessionStems);
   const sessionGenStatus = useStore((s) => s.sessionGenStatus);
   const pairChoices = useStore((s) => s.pairChoices);
   const pairLatencies = useStore((s) => s.pairLatencies);
@@ -54,6 +68,8 @@ export function Wait() {
   const startRef = useRef<number>(0);
 
   // Resolve the matched archetype + variation once, deterministically.
+  // Mirror still consumes this for its archetype paragraphs; Wait only uses
+  // the title fallback when DEMO_TRACK is null.
   const selectionRef = useRef(
     resolveSelection({
       pairChoices,
@@ -65,82 +81,34 @@ export function Wait() {
     })
   );
 
-  // Kick off generation on mount. Single effect, single fetch.
+  // Wire the demo track on mount. Static URLs only — no network call.
   useEffect(() => {
-    const sel = selectionRef.current;
-    if (!sel) {
-      // No commits at all — degenerate case. Skip ahead.
-      setSessionTrack(null, 'A piece for you', 'error');
-      setAudioReadyAt(performance.now());
-      return;
-    }
-
-    const title = sel.variation.tag;
+    const title = DEMO_TRACK?.tag ?? selectionRef.current?.variation.tag ?? 'A piece for you';
     setSessionTrack(null, title, 'composing');
 
-    // Fallback URL is the pre-rendered audition track for the picked
-    // variation — guaranteed to exist for all 24 variations.
-    const fallbackUrl = `/audio/audition/${sel.variation.id}.mp3`;
-
-    let cancelled = false;
-    const useFallback = (status: 'fallback' | 'error') => {
-      if (cancelled) return;
-      setSessionTrack(fallbackUrl, title, status);
+    if (DEMO_TRACK) {
+      const audioUrl = `/audio/audition/${DEMO_TRACK.id}.mp3`;
+      const stems = {
+        vocals: `/audio/stems/${DEMO_TRACK.id}/vocals.mp3`,
+        drums:  `/audio/stems/${DEMO_TRACK.id}/drums.mp3`,
+        bass:   `/audio/stems/${DEMO_TRACK.id}/bass.mp3`,
+        other:  `/audio/stems/${DEMO_TRACK.id}/other.mp3`,
+      };
+      setSessionTrack(audioUrl, title, 'fallback');
+      setSessionStems(stems);
       setAudioReadyAt(performance.now());
-    };
-
-    if (isOfflineMode()) {
-      // Skip the network round-trip entirely; fallback is silent and instant.
-      useFallback('fallback');
       return;
     }
 
-    const composeCtrl = new AbortController();
-    const timeout = window.setTimeout(() => composeCtrl.abort(), GEN_TIMEOUT_MS);
-
-    (async () => {
-      try {
-        const avdVec = computeAVD(pairChoices, pairLatencies).vector;
-        const plan = buildCompositionPlan({
-          archetype: sel.archetype,
-          variation: sel.variation,
-          avd: [avdVec.a, avdVec.v, avdVec.d],
-        });
-
-        const res = await fetch('/api/compose', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            compositionPlan: plan,
-            bucket: 'session',
-          }),
-          signal: composeCtrl.signal,
-        });
-        if (cancelled) return;
-        if (!res.ok) {
-          useFallback(res.status === 404 ? 'fallback' : 'error');
-          return;
-        }
-        const blob = await res.blob();
-        if (cancelled) return;
-        const url = URL.createObjectURL(blob);
-        setSessionTrack(url, title, 'ready');
-        // Stems sidecar deactivated — Listening uses single-source fallback.
-        // Re-enable by flipping STEMS_ENABLED in src/app/api/stems/route.ts
-        // and restoring the /api/stems fetch here.
-        setAudioReadyAt(performance.now());
-      } catch {
-        useFallback('error');
-      } finally {
-        window.clearTimeout(timeout);
-      }
-    })();
-
-    return () => {
-      cancelled = true;
-      window.clearTimeout(timeout);
-      composeCtrl.abort();
-    };
+    // DEMO_TRACK was set to null — degenerate path until live compose is
+    // re-wired. Use the picked variation's audition file with no stems.
+    const sel = selectionRef.current;
+    if (sel) {
+      setSessionTrack(`/audio/audition/${sel.variation.id}.mp3`, title, 'fallback');
+    } else {
+      setSessionTrack(null, title, 'error');
+    }
+    setAudioReadyAt(performance.now());
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
