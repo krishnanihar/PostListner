@@ -222,6 +222,10 @@ class ListeningEngine {
   }> = [];
   // Bregman onset-synchrony: only re-seek per-stem currentTime at section transitions.
   private lastSectionIdx = -1;
+  // Throttle playbackRate writes — assigning every frame triggers a resampler
+  // recalc each time, producing zipper-noise crackle. Only write when the new
+  // rate differs from the last written by >1 cent (~0.058% rate delta).
+  private lastWrittenPlaybackRate = 1;
 
   // Per-instance section table — softened if gentlePath is on. ARC_TOTAL_MS still
   // derives from the master SECTIONS constant (silence end is fixed regardless).
@@ -569,8 +573,14 @@ class ListeningEngine {
     if (this.masterGain) this.masterGain.gain.setTargetAtTime(masterFinal, t, SMOOTH);
 
     // Detune via playbackRate. ±25c ≈ playbackRate × 2^(c/1200) → ±~0.014.
-    if (this.audio) {
-      this.audio.playbackRate = Math.pow(2, detuneCents / 1200);
+    // Computed once per tick; only written when the change crosses ~1 cent
+    // (~0.058% delta). Writing every frame, even with the same value, triggers
+    // a resampler recalc per stem and produces audible zipper-noise crackle.
+    const newRate = Math.pow(2, detuneCents / 1200);
+    const rateChanged = Math.abs(newRate - this.lastWrittenPlaybackRate) > 0.0006;
+    if (rateChanged) {
+      this.lastWrittenPlaybackRate = newRate;
+      if (this.audio) this.audio.playbackRate = newRate;
     }
 
     // Per-stem macro updates — each stem orbits a different phase offset so
@@ -584,7 +594,7 @@ class ListeningEngine {
       node.filter.frequency.setTargetAtTime(filterFinal, this.ctx!.currentTime, 0.05);
       node.dryGain.gain.setTargetAtTime(1 - baseWet, this.ctx!.currentTime, 0.05);
       node.wetGain.gain.setTargetAtTime(baseWet, this.ctx!.currentTime, 0.05);
-      node.audio.playbackRate = Math.pow(2, detuneCents / 1200);
+      if (rateChanged) node.audio.playbackRate = newRate;
     });
 
     // Bregman onset-synchrony: at section boundaries, nudge stem currentTime
