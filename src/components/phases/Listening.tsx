@@ -206,26 +206,35 @@ class ListeningEngine {
   private pitchQueue: number[] = [];
   private accelQueue: number[] = [];
 
-  // Multi-stem HRTF chains. Empty when stems aren't available — the single-source
+  // Multi-stem chains. Empty when stems aren't available — the single-source
   // path (this.source/filter/dryGain/wetGain/panner) covers that case as graceful fallback.
+  // Per-stem `wetGain` was removed: wet (reverb) is now a single shared bus,
+  // diffuse (no per-stem panning), summed at masterGain via `sharedWetGain`.
+  // Old wiring fanned the convolver output to 4 wetGains and through 4 panners,
+  // multiplying wet amplitude by ~4× and producing destination clipping.
   private stemNodes: Array<{
     audio: HTMLAudioElement;
     source: MediaElementAudioSourceNode;
     filter: BiquadFilterNode;
     dryGain: GainNode;
-    wetGain: GainNode;
     panner: PannerNode;
     analyser: AnalyserNode;
     prevRMS: number;
     cooldown: number;
     timeBuf: Uint8Array<ArrayBuffer>;
   }> = [];
+  // Single shared wet bus for the multi-stem path. Convolver output flows here
+  // once and is mixed diffusely into masterGain (no HRTF on wet — reverb is
+  // direction-less in real rooms anyway).
+  private sharedWetGain: GainNode | null = null;
   // Bregman onset-synchrony: only re-seek per-stem currentTime at section transitions.
   private lastSectionIdx = -1;
   // Throttle playbackRate writes — assigning every frame triggers a resampler
   // recalc each time, producing zipper-noise crackle. Only write when the new
   // rate differs from the last written by >1 cent (~0.058% rate delta).
   private lastWrittenPlaybackRate = 1;
+  // Frame counter for throttling per-stem analyser reads (every 3rd frame ~= 20Hz).
+  private tickCount = 0;
 
   // Per-instance section table — softened if gentlePath is on. ARC_TOTAL_MS still
   // derives from the master SECTIONS constant (silence end is fixed regardless).
@@ -258,21 +267,22 @@ class ListeningEngine {
     this.freqBuf = new Uint8Array(new ArrayBuffer(analyser.frequencyBinCount));
     this.timeBuf = new Uint8Array(new ArrayBuffer(analyser.fftSize));
 
-    // Branch on stem availability: the multi-source HRTF graph gives each stem its
-    // own filter/dry-wet/panner chain so they can scatter spatially and temporally.
-    // The single-source path is graceful-degradation fallback when stems aren't ready.
+    // Branch on stem availability: the multi-source graph gives each stem its
+    // own filter/dry/panner chain so they can scatter spatially. Wet bus is
+    // shared and diffuse — fixes amplitude blow-up that was clipping the
+    // destination and producing constant crackle.
+    // panningModel switched to 'equalpower' from 'HRTF' for mobile CPU budget;
+    // 4× HRTF panners + convolver was starving the audio thread on iOS Safari.
     if (this.opts.stemUrls) {
-      // Wet path needs convolver→destination wiring once; per-stem wetGain feeds
-      // the per-stem panner directly (see buildStemChains), so the convolver is
-      // shared but its output is already attached to each panner via wetGain.
-      // Wire convolver's output into the master path here so the wet bus reaches
-      // the destination through masterGain's envelope.
-      // (Note: the wet share is summed at each per-stem panner, so we don't need
-      // a separate convolver→masterGain wire here.)
+      // Single shared wet bus: convolver → wetGain → masterGain (diffuse).
+      const sharedWetGain = ctx.createGain();
+      sharedWetGain.gain.value = this.sections[0].wetMix;
+      convolver.connect(sharedWetGain);
+      sharedWetGain.connect(masterGain);
+      this.sharedWetGain = sharedWetGain;
       await this.buildStemChains(ctx, this.opts.stemUrls, convolver, masterGain);
     } else {
       const audio = new Audio(this.opts.url);
-      audio.crossOrigin = 'anonymous';
       audio.loop = true;
       audio.preload = 'auto';
 
@@ -289,7 +299,7 @@ class ListeningEngine {
       wetGain.gain.value = this.sections[0].wetMix;
 
       const panner = ctx.createPanner();
-      panner.panningModel = 'HRTF';
+      panner.panningModel = 'equalpower';
       panner.distanceModel = 'inverse';
       panner.refDistance = 1;
       panner.maxDistance = 10;
@@ -359,7 +369,9 @@ class ListeningEngine {
     };
     for (const name of ['vocals', 'drums', 'bass', 'other'] as const) {
       const audio = new Audio(stems[name]);
-      audio.crossOrigin = 'anonymous';
+      // crossOrigin omitted — stems are same-origin static assets; setting it
+      // to 'anonymous' triggers needless CORS preflights on iOS Safari and can
+      // hiccup MediaElementSource decoding.
       audio.loop = false; // stems already cover the full arc
       audio.preload = 'auto';
 
@@ -371,12 +383,10 @@ class ListeningEngine {
       filter.Q.value = 0.7;
 
       const dryGain = ctx.createGain();
-      const wetGain = ctx.createGain();
       dryGain.gain.value = 1 - this.sections[0].wetMix;
-      wetGain.gain.value = this.sections[0].wetMix;
 
       const panner = ctx.createPanner();
-      panner.panningModel = 'HRTF';
+      panner.panningModel = 'equalpower';
       panner.distanceModel = 'inverse';
       panner.refDistance = 1;
       panner.maxDistance = 10;
@@ -386,13 +396,13 @@ class ListeningEngine {
       panner.positionY.value = py;
       panner.positionZ.value = pz;
 
-      // source → filter → split (dry direct + wet through shared convolver) → panner → master
+      // source → filter → dryGain → panner → masterGain (per-stem dry path).
+      // filter → convolver contributes to the shared wet bus once; the wet bus
+      // is summed into masterGain in start() — no per-stem wet panning.
       source.connect(filter);
       filter.connect(dryGain);
       filter.connect(convolver);
-      convolver.connect(wetGain);
       dryGain.connect(panner);
-      wetGain.connect(panner);
       panner.connect(masterGain);
 
       // Per-stem analyser tap pre-spatial — onsets reflect what was played, not where.
@@ -404,7 +414,7 @@ class ListeningEngine {
 
       await audio.play().catch(() => {});
       this.stemNodes.push({
-        audio, source, filter, dryGain, wetGain, panner,
+        audio, source, filter, dryGain, panner,
         analyser,
         prevRMS: 0,
         cooldown: 0,
@@ -586,6 +596,9 @@ class ListeningEngine {
     // Per-stem macro updates — each stem orbits a different phase offset so
     // stems scatter spatially as panDriftWidth widens (Bregman spatial cue).
     // No-ops when stemNodes is empty (single-source path).
+    // Wet level is shared (single sharedWetGain bus), updated once below;
+    // per-stem wetGain was removed because fanning the convolver to 4
+    // wetGains × 4 panners produced 4× wet amplitude → destination clipping.
     const blendedSpatialScatter = lerpSec(sec.panDriftWidth, next.panDriftWidth);
     this.stemNodes.forEach((node, i) => {
       const orbit = Math.sin((elapsed / 1000 / 11) * Math.PI * 2 + i * (Math.PI / 2));
@@ -593,9 +606,12 @@ class ListeningEngine {
       node.panner.positionX.setTargetAtTime(stemPanX, this.ctx!.currentTime, 0.05);
       node.filter.frequency.setTargetAtTime(filterFinal, this.ctx!.currentTime, 0.05);
       node.dryGain.gain.setTargetAtTime(1 - baseWet, this.ctx!.currentTime, 0.05);
-      node.wetGain.gain.setTargetAtTime(baseWet, this.ctx!.currentTime, 0.05);
       if (rateChanged) node.audio.playbackRate = newRate;
     });
+    // Single shared wet update (multi-stem path).
+    if (this.sharedWetGain) {
+      this.sharedWetGain.gain.setTargetAtTime(baseWet, t, SMOOTH);
+    }
 
     // Bregman onset-synchrony: at section boundaries, nudge stem currentTime
     // by ±half the section's onsetOffsetMs. Vocals (i=0) stays anchored as the
@@ -646,7 +662,10 @@ class ListeningEngine {
     // Per-stem onset detection. When stems are loaded each stem owns its
     // analyser; stem index maps directly to stave (vocals=0, drums=1, bass=2,
     // other=3). No-op when stemNodes is empty (single-source path handled above).
-    if (this.stemNodes.length > 0) {
+    // Throttled to every 3rd frame (~20Hz) — 4× 1024-sample byte-array reads +
+    // RMS loops every 16ms was main-thread-heavy on mobile and starved rAF.
+    this.tickCount = (this.tickCount + 1) | 0;
+    if (this.stemNodes.length > 0 && this.tickCount % 3 === 0) {
       this.stemNodes.forEach((node, idx) => {
         node.analyser.getByteTimeDomainData(node.timeBuf);
         let sumSq = 0;
